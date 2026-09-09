@@ -165,7 +165,7 @@ def build_face(project):
     return parts
 
 
-def export_3mf(parts, path, palette=None):
+def export_3mf(parts, path, palette=None, assembly_name='CardForge flush face'):
     ns='http://schemas.microsoft.com/3dmanufacturing/core/2015/02'
     ET.register_namespace('',ns)
     def tag(n): return '{'+ns+'}'+n
@@ -186,14 +186,14 @@ def export_3mf(parts, path, palette=None):
         for tri in part['mesh'].faces:
             ET.SubElement(ts,tag('triangle'),dict(zip(('v1','v2','v3'),map(str,tri))))
     rootid=len(parts)+1
-    root=ET.SubElement(resources,tag('object'),{'id':str(rootid),'type':'model','name':'CardForge flush face'})
+    root=ET.SubElement(resources,tag('object'),{'id':str(rootid),'type':'model','name':assembly_name})
     components=ET.SubElement(root,tag('components'))
     for i in range(1,rootid):
         ET.SubElement(components,tag('component'),{'objectid':str(i)})
     ET.SubElement(ET.SubElement(model,tag('build')),tag('item'),{'objectid':str(rootid)})
     config=ET.Element('config')
     obj=ET.SubElement(config,'object',{'id':str(rootid)})
-    ET.SubElement(obj,'metadata',{'key':'name','value':'CardForge flush face'})
+    ET.SubElement(obj,'metadata',{'key':'name','value':assembly_name})
     for i,part in enumerate(parts,1):
         node=ET.SubElement(obj,'part',{'id':str(i),'subtype':'normal_part'})
         ET.SubElement(node,'metadata',{'key':'name','value':part['name']})
@@ -257,7 +257,7 @@ def export_logo(project, output):
     parts = build_logo_parts(project)
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
-    export_3mf(parts, out / 'CardForge_Logo.3mf', project.hueforge.palette)
+    export_3mf(parts, out / 'CardForge_Logo.3mf', project.hueforge.palette, 'CardForge standalone logo')
     stls = out / 'Logo_STLs'
     stls.mkdir(exist_ok=True)
     info = []
