@@ -66,7 +66,10 @@ def extrude(poly, z0: float, z1: float):
         if verts and faces:
             pieces.append(trimesh.Trimesh(vertices=np.asarray(verts), faces=np.asarray(faces), process=False))
 
-    return _mesh_merge(pieces)
+    mesh = _mesh_merge(pieces)
+    if mesh is not None:
+        mesh.fix_normals()
+    return mesh
 
 
 def _signed_area2(coords):

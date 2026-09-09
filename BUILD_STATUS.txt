@@ -1,25 +1,13 @@
-CardForge 4D 0.4 Alpha - Build Status
+CardForge 4D 0.4.1 Alpha
 
-Development environment validation:
-- Python source compile: PASS
-- Core smoke test: PASS
-- Perspective correction: PASS
-- Manual corner warp: PASS
-- Editable image composition: PASS
-- OCR helper / clean-plate pipeline: PASS
-- Logo extraction / cleanup helpers: PASS
-- NFC base generation: PASS
-- Base watertightness: PASS
-- FlatForge STL import + XY normalization with preserved Z: PASS
-- Multi-volume 3MF import path: PASS
-- HueForge handoff export: PASS
-- Portable .cardforge bundle save/reopen: PASS
-- GUI module import: PASS
+The GitHub Windows workflow runs the core smoke test, regression tests and
+source runtime test, then builds and tests CardForge4D.exe before publishing.
+Each successful release includes exe-test.json with the packaged test results.
 
-Not validated in this Linux environment:
-- RapidOCR inference itself (package network access is unavailable here).
-- Windows PyInstaller EXE runtime.
-- Bambu Studio import on an actual Windows workstation.
-- Real HueForge/FlatForge round-trip with production files.
+Tests cover synthetic perspective correction, image composition, logo helpers,
+watertight and oriented NFC geometry, cavity depth, transformed 3MF instances,
+portable project geometry, GUI startup and real OCR with networking disabled.
 
-The Windows builder and GitHub Actions workflow explicitly install/initialize RapidOCR + ONNX Runtime before tests/build so failures should be caught in Windows CI.
+Not validated: physical printing on the Bambu A1, NFC radio performance after
+assembly, and a production HueForge/FlatForge round-trip. The 3D preview is
+schematic. Review OCR text and test-fit your actual tag and face before gluing.

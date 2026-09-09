@@ -1,4 +1,8 @@
-# CardForge 4D 0.4 Alpha
+# CardForge 4D 0.4.1 Alpha
+
+Download the tested Windows executable from [Releases](https://github.com/curtispassley-hue/card-forge/releases). Each published alpha passes a packaged runtime self-test before upload. No Python installation is needed to run the EXE.
+
+This repository starts from the supplied `CardForge4D_v0_4_alpha.zip`. See [0.4.1 fixes and limitations](RELEASE_NOTES_0_4_1.md). The corrected default base is 2.6 mm thick, with a 0.7 mm floor below the NFC pocket. Old projects with thinner bases may need adjustment.
 
 CardForge 4D converts a photographed business card into a two-piece 3D-printable NFC card workflow designed around a Bambu Lab A1 / AMS Lite and HueForge / FlatForge.
 

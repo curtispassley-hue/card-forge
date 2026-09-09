@@ -7,7 +7,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows:
@@ -59,6 +59,21 @@ jobs:
           Copy-Item README.md release\README.md
           Copy-Item LICENSE.txt release\LICENSE.txt
           Compress-Archive -Path release\* -DestinationPath CardForge4D-Windows.zip -Force
+          git archive --format=zip --output=CardForge4D-Source.zip HEAD
+
+      - name: Publish tested alpha download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = 'v0.4.1-alpha.${{ github.run_number }}'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.4.1 Alpha' --notes-file RELEASE_NOTES_0_4_1.md
+            if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
+          }
+          gh release upload $tag dist/CardForge4D.exe CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
@@ -67,6 +82,7 @@ jobs:
           path: |
             dist/CardForge4D.exe
             CardForge4D-Windows.zip
+            CardForge4D-Source.zip
             exe-test.json
             source-test.json
 

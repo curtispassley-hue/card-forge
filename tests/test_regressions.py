@@ -4,10 +4,16 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from cardforge.core.project import Project
-from cardforge.core.geometry import build_nfc_base, import_hueforge_models, normalize_face_meshes
+from cardforge.core.geometry import build_nfc_base, import_hueforge_models, normalize_face_meshes, make_face_blank
 
 
 class RegressionTests(unittest.TestCase):
+    def test_face_solid(self):
+        mesh = make_face_blank(Project().geometry, 0.8)
+        self.assertTrue(mesh.is_watertight)
+        self.assertTrue(mesh.is_winding_consistent)
+        self.assertGreater(mesh.volume, 0)
+
     def test_nfc_depth_and_solid(self):
         p = Project()
         m = build_nfc_base(p.geometry, p.nfc)

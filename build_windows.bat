@@ -40,10 +40,16 @@ echo.
 echo Running core smoke test...
 python -m tests.smoke_test
 if errorlevel 1 goto :fail
+python -m unittest discover -v
+if errorlevel 1 goto :fail
+python main.py --self-test source-test.json
+if errorlevel 1 goto :fail
 
 echo.
 echo Building one-file EXE...
 pyinstaller --noconfirm --clean CardForge4D.spec
+if errorlevel 1 goto :fail
+start /wait "" dist\CardForge4D.exe --self-test exe-test.json
 if errorlevel 1 goto :fail
 
 if exist dist\CardForge4D.exe (

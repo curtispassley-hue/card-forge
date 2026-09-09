@@ -22,7 +22,7 @@ from .core.geometry import export_base_stl, make_face_blank, face_target_dimensi
 from .core.hueforge import export_hueforge_package, import_hueforge_path
 
 
-VERSION = "0.4 Alpha"
+VERSION = "0.4.1 Alpha"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
