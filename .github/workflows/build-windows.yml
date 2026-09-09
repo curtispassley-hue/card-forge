@@ -38,6 +38,7 @@ jobs:
           python -m unittest discover -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python main.py --self-test source-test.json
+          if (Test-Path source-test.json) { Get-Content source-test.json }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build EXE
