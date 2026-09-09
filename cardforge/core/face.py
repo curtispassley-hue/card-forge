@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from shapely.geometry import box, Polygon
-from shapely.ops import unary_union
+from shapely.ops import unary_union, triangulate
 from shapely import affinity, constrained_delaunay_triangles
 from .geometry import rounded_rect, face_target_dimensions, export_base_stl
 from .image_processing import fit_card_image, hex_to_rgb
@@ -14,57 +14,112 @@ from .fonts import default_font
 import trimesh
 
 
-def prism(poly, z0, z1, _retry=False):
-    """Constrained caps preserve concave outlines and letter counters exactly."""
-    meshes = []
-    for geom in getattr(poly, 'geoms', [poly]):
-        if not isinstance(geom, Polygon) or geom.is_empty or geom.area < 1e-9:
-            continue
-        verts, faces, lookup = [], [], {}
-        def v(x, y, z):
-            key = (round(x, 8), round(y, 8), round(z, 8))
-            if key not in lookup:
-                lookup[key] = len(verts)
-                verts.append(key)
-            return lookup[key]
-        for tri in constrained_delaunay_triangles(geom).geoms:
-            c = list(tri.exterior.coords)[:3]
-            faces.append([v(x, y, z0) for x, y in c])
-            faces.append([v(x, y, z1) for x, y in c])
-        for ring in [geom.exterior, *geom.interiors]:
-            for (x, y), (xx, yy) in zip(ring.coords[:-1], ring.coords[1:]):
-                a,b,c,d = v(x,y,z0),v(xx,yy,z0),v(xx,yy,z1),v(x,y,z1)
-                faces.extend([[a,b,c],[a,c,d]])
-        mesh = trimesh.Trimesh(verts, faces, process=True)
+def _polygon_triangles(geom):
+    """Return a complete set of triangles inside a cleaned polygon.
+
+    Constrained Delaunay is ideal for lettering, but a raster logo can contain
+    a nearly collinear edge that makes its cap non-manifold.  The filtered
+    Shapely triangulation is a reliable fallback for those outlines and still
+    preserves holes because triangles must be fully covered by the polygon.
+    """
+    try:
+        result = constrained_delaunay_triangles(geom)
+        constrained = [t for t in getattr(result, 'geoms', [result])
+                        if isinstance(t, Polygon) and geom.covers(t) and t.area > 1e-9]
+        if constrained and sum(t.area for t in constrained) >= geom.area * (1.0 - 1e-7):
+            return constrained
+    except Exception:
+        pass
+    try:
+        result = triangulate(geom)
+        return [t for t in result if isinstance(t, Polygon) and geom.covers(t) and t.area > 1e-9]
+    except Exception:
+        return []
+
+
+def _extrude_polygon(geom, z0, z1):
+    triangles = _polygon_triangles(geom)
+    if not triangles:
+        return None
+    verts, faces, lookup = [], [], {}
+
+    def v(x, y, z):
+        key = (round(x, 8), round(y, 8), round(z, 8))
+        if key not in lookup:
+            lookup[key] = len(verts)
+            verts.append(key)
+        return lookup[key]
+
+    for tri in triangles:
+        c = list(tri.exterior.coords)[:3]
+        faces.append([v(x, y, z0) for x, y in c])
+        faces.append([v(x, y, z1) for x, y in c])
+    for ring in [geom.exterior, *geom.interiors]:
+        for (x, y), (xx, yy) in zip(ring.coords[:-1], ring.coords[1:]):
+            a, b, c, d = v(x, y, z0), v(xx, yy, z0), v(xx, yy, z1), v(x, y, z1)
+            faces.extend([[a, b, c], [a, c, d]])
+    mesh = trimesh.Trimesh(verts, faces, process=True)
+    mesh.fix_normals()
+    if not mesh.is_watertight:
+        # This repairs only a genuinely open cap; it does not change a valid
+        # outline and handles a single missing triangle from a tiny counter.
+        mesh.fill_holes()
+        mesh.remove_unreferenced_vertices()
         mesh.fix_normals()
-        if not mesh.is_watertight or not mesh.is_winding_consistent:
-            # Raster logos can leave a one-pixel zig-zag around a counter or
-            # a retraced collinear edge.  Shapely keeps that outline valid,
-            # but the triangulated cap can then contain one four-way edge.
-            # Remove only that sub-pixel noise and retry; this keeps the
-            # intended letter/logo silhouette while producing a closed STL.
-            if not _retry:
-                # Most cases are fixed by the first tolerance; the larger
-                # fallbacks handle a heavily antialiased logo without making
-                # the normal text path coarser.
-                for tolerance in (0.05, 0.08, 0.12):
-                    cleaned = geom.simplify(tolerance, preserve_topology=True)
-                    if not isinstance(cleaned, Polygon) or cleaned.is_empty or cleaned.area <= 1e-9:
-                        continue
-                    if cleaned.equals_exact(geom, 1e-9):
-                        continue
-                    try:
-                        retry = prism(cleaned, z0, z1, _retry=True)
-                    except ValueError:
-                        continue
-                    if retry is not None and retry.is_watertight and retry.is_winding_consistent:
-                        meshes.append(retry)
-                        break
-                else:
-                    raise ValueError('A face outline could not form a closed solid. Try a simpler logo or larger text.')
+    return mesh
+
+
+def prism(poly, z0, z1, _retry=False, logo_cleanup=False):
+    """Extrude polygons with bounded cleanup for raster-logo edge artifacts."""
+    meshes = []
+    parts = [poly] if isinstance(poly, Polygon) else list(getattr(poly, 'geoms', []))
+    for source in parts:
+        if not isinstance(source, Polygon) or source.is_empty or source.area < 1e-9:
+            continue
+        variants = [source]
+        # buffer(0) repairs self-touching rings without visibly changing a
+        # normal logo.  The small simplification steps remove sub-pixel zigzags
+        # only when both triangulators cannot close the original outline.
+        try:
+            repaired = source.buffer(0)
+            if isinstance(repaired, Polygon) and not repaired.is_empty:
+                variants.append(repaired)
+        except Exception:
+            pass
+        # A raster slit can become a zero-width backtracking edge after the
+        # pixel boxes are unioned. A close/open keeps the silhouette while
+        # merging only sub-nozzle pinholes. Backgrounds use tiny radii to keep
+        # their complementary volume unchanged; logos may need a wider close
+        # for counters that are narrower than one sampled pixel.
+        radii = (0.04, 0.06, 0.09) if logo_cleanup else (0.005, 0.01, 0.02)
+        for radius in radii:
+            try:
+                smoothed = source.buffer(radius).buffer(-radius)
+                if isinstance(smoothed, Polygon) and not smoothed.is_empty and smoothed.area > 1e-9:
+                    variants.append(smoothed)
+            except Exception:
                 continue
+        for tolerance in (0.02, 0.05, 0.08, 0.12):
+            try:
+                cleaned = source.simplify(tolerance, preserve_topology=True)
+                if isinstance(cleaned, Polygon) and not cleaned.is_empty and cleaned.area > 1e-9:
+                    variants.append(cleaned)
+            except Exception:
+                continue
+        solved = None
+        seen = set()
+        for candidate in variants:
+            key = candidate.wkb
+            if key in seen:
+                continue
+            seen.add(key)
+            solved = _extrude_polygon(candidate, z0, z1)
+            if solved is not None and solved.is_watertight and solved.is_winding_consistent:
+                break
+            solved = None
+        if solved is None:
             raise ValueError('A face outline could not form a closed solid. Try a simpler logo or larger text.')
-        meshes.append(mesh)
+        meshes.append(solved)
     return trimesh.util.concatenate(meshes) if meshes else None
 
 
@@ -151,7 +206,7 @@ def build_face(project):
     for name,color,poly in regions:
         # Mirror X: artwork becomes readable when the bed-side face is turned over.
         poly=affinity.scale(poly,xfact=-1,yfact=1,origin=(fw/2,fh/2))
-        mesh=prism(poly,0,depth)
+        mesh=prism(poly,0,depth,logo_cleanup=name.startswith('Logo -'))
         if mesh is not None:
             parts.append({'name':name,'color':color,'mesh':mesh,'polygon':poly,'z0':0,'z1':depth})
     parts.append({'name':'Solid backing','color':settings.background_color,

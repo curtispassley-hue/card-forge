@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 import tempfile
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from cardforge.core.logo import remove_logo_background
 from cardforge.core.image_processing import nearest_palette_preview, hex_to_rgb
 from cardforge.core.project import Project, TextLayer
@@ -51,6 +51,26 @@ class EditorTests(unittest.TestCase):
             p = Project()
             p.logo.path = str(logo)
             p.logo.width_mm = 19.8
+            parts = build_face(p)
+            self.assertTrue(all(x['mesh'].is_watertight for x in parts))
+
+    def test_logo_with_narrow_raster_counters_forms_closed_solid(self):
+        # Heavy display faces commonly create one-pixel backtracking edges
+        # around counters after resizing. Keep this Windows-font regression
+        # because it was the original user-facing export failure.
+        font_path = Path('C:/Windows/Fonts/impact.ttf')
+        if not font_path.exists():
+            self.skipTest('Impact display font is not installed on this host')
+        with tempfile.TemporaryDirectory() as td:
+            logo = Path(td) / 'display-logo.png'
+            im = Image.new('RGBA', (1000, 300), (0, 0, 0, 0))
+            font = ImageFont.truetype(str(font_path), 120)
+            ImageDraw.Draw(im).text((5, 150), 'A&W #$% 123', font=font,
+                                    fill=(20, 20, 20, 255), anchor='lm', stroke_width=3)
+            im.save(logo)
+            p = Project()
+            p.logo.path = str(logo)
+            p.logo.width_mm = 40
             parts = build_face(p)
             self.assertTrue(all(x['mesh'].is_watertight for x in parts))
 

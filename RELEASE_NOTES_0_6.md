@@ -8,6 +8,7 @@ This release removes HueForge from the face production path. CardForge creates a
 - Bambu Studio part metadata includes suggested filament slots.
 - Logo scaling and plain-background removal remain available.
 - Logo editor now shows a transparency preview, supports enable/opacity controls, and exports a standalone named `CardForge_Logo.3mf` plus aligned/logo-only STLs.
+- Logo extrusion now repairs tiny raster slits and narrow counters with a bounded close/open and a filtered triangulation fallback, preventing common “closed solid” export failures.
 - Controls use grouped sections, consistent action hierarchy, and compact text icons so the five-step workflow is easier to follow.
 - Added 30 bundled OFL sample fonts with live text previews.
 - Next / Back navigation, Undo / Redo, and responsive export remain available.
