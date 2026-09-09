@@ -74,9 +74,10 @@ def run():
                 ticks += 1
                 time.sleep(0.01)
             assert not app.busy and ticks > 1 and notices, (ticks, notices, errors)
-        assert (target/'CardForge_Face.3mf').exists()
-        assert (target/'Parts.json').exists()
-        assert (target/'Aligned_STLs').is_dir()
+        face_output = next(target.glob('CardForge_Face_*'))
+        assert (face_output/'CardForge_Face.3mf').exists()
+        assert (face_output/'Parts.json').exists()
+        assert (face_output/'Aligned_STLs').is_dir()
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
              patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
@@ -85,7 +86,38 @@ def run():
             while app.busy and time.monotonic() < deadline:
                 app.update()
                 time.sleep(0.01)
-            assert not app.busy and (target/'CardForge_Logo.3mf').exists()
+            assert not app.busy and list(target.glob('CardForge_Logo_*/CardForge_Logo.3mf'))
+        # A complete design without a reference photo, through GUI save/open.
+        app.start_template('Business card')
+        assert app.project.source_image == '' and len(app.project.texts) == 4
+        app.update()
+        assert app.canvas_views['design']['view_w'] > 0
+        portable = td/'scratch.cardforge'
+        with patch('cardforge.gui.filedialog.asksaveasfilename', return_value=str(portable)):
+            assert app.save_project()
+        app.new_project()
+        with patch('cardforge.gui.filedialog.askopenfilename', return_value=str(portable)):
+            app.open_project()
+        assert len(app.project.texts) == 4 and not app.project.source_image
+        app.text_list.selection_set(0)
+        app.refresh_design_preview()
+        assert app.text_list.curselection() == (0,)
+        app.duplicate_text()
+        assert len(app.project.texts) == 5
+        app.undo()
+        assert len(app.project.texts) == 4
+        app.text_dialog(0)
+        app.update()
+        # The self-test intentionally keeps the root withdrawn.  Tk therefore
+        # reports a dialog as not viewable even though it was created and owns
+        # the input grab; inspect the actual child window instead.
+        import tkinter as tk
+        modals = [child for child in app.winfo_children() if isinstance(child, tk.Toplevel)]
+        assert modals and modals[0].grab_current() is not None
+        modal = modals[0]
+        modal.destroy()
+        scratch_output = export_face(app.project, td/'scratch-export', include_base=True)
+        assert (scratch_output/'CardForge_NFC_Base.stl').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
+        return {'passed': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}

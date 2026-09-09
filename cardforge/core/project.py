@@ -78,7 +78,7 @@ class FaceSettings:
 
 @dataclass
 class Project:
-    format_version: str = "0.6.0"
+    format_version: str = "0.7.0"
     name: str = "Untitled Card"
     source_image: str = ""
     corrected_image: str = ""
@@ -164,12 +164,19 @@ class Project:
                     asset_map[f"assets/hueforge/{model.name}"] = model
             data["hueforge_import_path"] = "bundle://assets/hueforge"
 
-        # Imported HueForge geometry can be huge and may be a folder. Keep its
-        # external path rather than silently duplicating it into every project.
-        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-            z.writestr("project.json", json.dumps(data, indent=2))
-            for arc, src in asset_map.items():
-                z.write(src, arcname=arc)
+        import os
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix='.cardforge_', suffix='.tmp', dir=path.parent)
+        os.close(fd)
+        temp_path = Path(temp_name)
+        try:
+            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as z:
+                z.writestr('project.json', json.dumps(data, indent=2))
+                for arc, src in asset_map.items():
+                    z.write(src, arcname=arc)
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
         return path
 
     @classmethod

@@ -1,6 +1,13 @@
-CardForge 4D 0.6 Alpha
+CardForge 4D 0.7 Preview
 
 This release removes HueForge from the face production path. CardForge creates a direct Bambu Studio multipart 3MF plus aligned STLs.
+
+- Added photo-free Blank card, Business card, and Membership card starter templates.
+- Added a guided Design studio with separate Text, Logo, and Photo panels, original line icons, live font preview, palette-color buttons, and a clearer card canvas.
+- Added a safe portable save path for scratch designs and a close prompt for unsaved changes.
+- Added exact sampled face previews, nearest palette mapping for text/background, and standard 3MF base-material colors.
+- Logo exports now build from the same isolated logo geometry and are written to a fresh folder so stale files cannot be mistaken for a new result.
+- Logo extrusion uses exact cap boundaries and removes only sub-pixel contact points before the matching background is cut, preventing common non-manifold counter failures.
 
 - Text and logo become flush, named front-layer geometry parts.
 - A continuous solid backing keeps the back flat; the outer face remains flat too.
