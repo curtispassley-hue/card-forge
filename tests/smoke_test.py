@@ -108,7 +108,7 @@ def main():
     assert Path(p2.cleaned_image).exists()
     assert Path(p2.logo.path).exists()
 
-    print("CARDFORGE 0.4 SMOKE TEST PASSED")
+    print("CARDFORGE 0.6 SMOKE TEST PASSED")
     print(td)
 
 

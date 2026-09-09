@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import cv2
 import numpy as np
+from .fonts import default_font
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -160,7 +161,7 @@ def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float
             continue
         px = max(8, int(round(layer.size_pt * 25.4 / 72 * ppm)))
         try:
-            font = ImageFont.truetype(layer.font_path, px) if layer.font_path else ImageFont.truetype("arial.ttf", px)
+            font = ImageFont.truetype(layer.font_path, px) if layer.font_path else ImageFont.truetype(default_font(), px)
         except Exception:
             font = ImageFont.load_default(size=px)
         x = int(round(layer.x_mm * ppm))

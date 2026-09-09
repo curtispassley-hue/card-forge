@@ -1,9 +1,10 @@
-# PyInstaller spec for a portable Windows one-file GUI executable.
-# RapidOCR model files are collected into the EXE so OCR works offline on the
-# receiving Windows PC; no Tesseract install or administrator rights required.
+# PyInstaller spec for a portable Windows folder GUI application.
+# RapidOCR model files and bundled fonts are collected beside the EXE so OCR
+# and the font picker work offline; no administrator rights are required.
 from PyInstaller.utils.hooks import collect_all
 
 datas=[]; binaries=[]; hiddenimports=[]
+datas += [("cardforge/assets/fonts", "cardforge/assets/fonts")]
 for pkg in ("cv2", "PIL", "shapely", "trimesh", "lxml", "rapidocr", "onnxruntime"):
     d,b,h = collect_all(pkg)
     datas += d; binaries += b; hiddenimports += h

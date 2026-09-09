@@ -7,4 +7,5 @@ if not exist .venv\Scripts\python.exe (
   exit /b 1
 )
 call .venv\Scripts\activate.bat
+if not exist cardforge\assets\fonts\manifest.json python scripts\fetch_fonts.py
 python main.py

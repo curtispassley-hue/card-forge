@@ -6,3 +6,7 @@ release/
 *-test.json
 *.zip
 .venv/
+# Font binaries are downloaded from the pinned Google Fonts revision by the
+# build script so the source repository stays small. Release builds bundle
+# the full 30-font library inside the Windows app.
+cardforge/assets/fonts/

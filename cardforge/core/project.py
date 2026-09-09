@@ -70,8 +70,15 @@ class EditorSettings:
 
 
 @dataclass
+class FaceSettings:
+    thickness_mm: float = 0.8
+    front_depth_mm: float = 0.4
+    background_color: str = "#FFFFFF"
+
+
+@dataclass
 class Project:
-    format_version: str = "0.4.0"
+    format_version: str = "0.6.0"
     name: str = "Untitled Card"
     source_image: str = ""
     corrected_image: str = ""
@@ -86,6 +93,7 @@ class Project:
     editor: EditorSettings = field(default_factory=EditorSettings)
     texts: list[TextLayer] = field(default_factory=list)
     logo: LogoLayer = field(default_factory=LogoLayer)
+    face: FaceSettings = field(default_factory=FaceSettings)
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
@@ -97,6 +105,7 @@ class Project:
         data["nfc"] = NFCSettings(**data.get("nfc", {}))
         data["hueforge"] = HueForgeSettings(**data.get("hueforge", {}))
         data["editor"] = EditorSettings(**data.get("editor", {}))
+        data["face"] = FaceSettings(**data.get("face", {}))
         data["texts"] = [TextLayer(**x) for x in data.get("texts", [])]
         data["logo"] = LogoLayer(**data.get("logo", {}))
         data.setdefault("format_version", "0.2.0")

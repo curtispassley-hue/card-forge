@@ -1,4 +1,4 @@
-name: Build CardForge4D 0.5 Windows App
+name: Build CardForge4D 0.6 Windows App
 
 on:
   workflow_dispatch:
@@ -24,6 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      - name: Download pinned sample fonts
+        run: python scripts/fetch_fonts.py
 
       - name: Verify offline OCR runtime
         run: python -c "from rapidocr import RapidOCR; import onnxruntime; RapidOCR(); print('RapidOCR / ONNX Runtime ready')"
@@ -80,10 +83,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $tag = 'v0.5.0-alpha.${{ github.run_number }}'
+          $tag = 'v0.6.0-alpha.${{ github.run_number }}'
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.5 Alpha' --notes-file RELEASE_NOTES_0_5.md
+            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.6 Alpha' --notes-file RELEASE_NOTES_0_6.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
           gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json defender-scan.json --clobber

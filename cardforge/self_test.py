@@ -8,6 +8,7 @@ def run():
     from cardforge.core.ocr import ocr_candidates
     from cardforge.core.project import Project
     from cardforge.core.geometry import build_nfc_base, make_face_blank, import_hueforge_models
+    from cardforge.core.face import export_face
     from cardforge.gui import CardForgeApp
     import trimesh
     with tempfile.TemporaryDirectory() as td:
@@ -59,12 +60,12 @@ def run():
         assert app.tabs.index(app.tabs.select()) == 1
         app.navigate(-1)
         assert app.tabs.index(app.tabs.select()) == 0
-        target = td/'handoff'
+        target = td/'face-output'
         notices = []
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
              patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
-            app.export_hueforge()
+            app.export_face_files()
             assert app.busy
             ticks = 0
             deadline = time.monotonic() + 30
@@ -73,8 +74,9 @@ def run():
                 ticks += 1
                 time.sleep(0.01)
             assert not app.busy and ticks > 1 and notices, (ticks, notices)
-        assert (target/'CardForge_HueForge_Source.png').exists()
-        assert (target/'CardForge_4Filament_Preview.png').exists()
+        assert (target/'CardForge_Face.3mf').exists()
+        assert (target/'Parts.json').exists()
+        assert (target/'Aligned_STLs').is_dir()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, '3mf_import': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_hueforge_export': True}
+        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}

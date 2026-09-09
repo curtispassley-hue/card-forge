@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title CardForge 4D 0.4 Windows Builder
+title CardForge 4D 0.6 Windows Builder
 
 echo ==============================================
-echo CardForge 4D 0.4 - build standalone Windows EXE
+echo CardForge 4D 0.6 - build standalone Windows folder app
 echo ==============================================
 
 echo Checking Python...
@@ -29,6 +29,11 @@ if errorlevel 1 goto :fail
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
 python -m pip install pyinstaller
+if errorlevel 1 goto :fail
+
+echo.
+echo Downloading the pinned sample font library...
+python scripts\fetch_fonts.py
 if errorlevel 1 goto :fail
 
 echo.

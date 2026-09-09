@@ -12,9 +12,11 @@ import tempfile
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 from .core.project import Project, TextLayer
+from .core.face import export_face
+from .core.fonts import bundled_fonts, default_font
 from .core.ocr import backend_status, ocr_candidates, remove_ocr_text, candidates_to_text_layers, OCRCandidate
 from .core.logo import extract_logo, remove_logo_region, suggest_logo_regions, remove_logo_background
 from .core.image_processing import (
@@ -25,10 +27,10 @@ from .core.image_processing import (
     nearest_palette_preview,
 )
 from .core.geometry import export_base_stl, make_face_blank, face_target_dimensions, validate_geometry, normalize_face_meshes
-from .core.hueforge import export_hueforge_package, import_hueforge_path
+from .core.hueforge import import_hueforge_path  # legacy reader for 0.4 projects
 
 
-VERSION = "0.5 Alpha"
+VERSION = "0.6 Alpha"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
@@ -113,6 +115,8 @@ class CardForgeApp(tk.Tk):
         self.next_button.configure(state='disabled' if i == 4 else 'normal')
         if i == 1:
             self.after_idle(self.refresh_design_preview)
+        elif i == 2:
+            self.after_idle(self.refresh_face_preview)
         elif i == 3:
             self.after_idle(self.draw_3d_preview)
         elif i == 4:
@@ -120,7 +124,7 @@ class CardForgeApp(tk.Tk):
 
     def navigate(self, delta):
         self.apply_logo()
-        self.sync_hueforge_fields()
+        self.sync_face_fields()
         self.apply_geometry()
         self.tabs.select(max(0, min(4, self.tabs.index(self.tabs.select()) + delta)))
 
@@ -230,13 +234,13 @@ class CardForgeApp(tk.Tk):
 
         self.tabs.add(self.source_tab, text="1  Photo")
         self.tabs.add(self.design_tab, text="2  Edit")
-        self.tabs.add(self.hf_tab, text="3  HueForge")
+        self.tabs.add(self.hf_tab, text="3  Face / Colors")
         self.tabs.add(self.assembly_tab, text="4  NFC / Assembly")
         self.tabs.add(self.check_tab, text="5  Printability")
 
         self._source_ui()
         self._design_ui()
-        self._hueforge_ui()
+        self._face_ui()
         self._assembly_ui()
         self._check_ui()
 
@@ -334,13 +338,13 @@ class CardForgeApp(tk.Tk):
         self.design_canvas.bind("<ButtonRelease-1>", self.design_release)
         ttk.Button(right, text="Refresh Edited Preview", command=self.refresh_design_preview).pack(anchor="e", pady=(8, 0))
 
-    def _hueforge_ui(self):
+    def _face_ui(self):
         left = ttk.Frame(self.hf_tab)
         left.pack(side="left", fill="y", padx=(0, 12))
         right = ttk.Frame(self.hf_tab)
         right.pack(side="right", fill="both", expand=True)
 
-        ttk.Label(left, text="HueForge / FlatForge", font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        ttk.Label(left, text="Flush face / colors", font=("Segoe UI", 16, "bold")).pack(anchor="w")
         ttk.Label(left, text="Use your four actual A1 / AMS Lite filaments.", wraplength=300).pack(anchor="w", pady=(8, 10))
 
         self.color_buttons = []
@@ -357,27 +361,21 @@ class CardForgeApp(tk.Tk):
 
         self.face_thickness = tk.DoubleVar()
         self.transparent_cap = tk.DoubleVar()
-        self._field(left, "Target face thickness mm", self.face_thickness)
-        self._field(left, "FlatForge cap mm", self.transparent_cap)
+        self._field(left, "Total face thickness mm", self.face_thickness)
+        self._field(left, "Front color depth mm", self.transparent_cap)
 
-        ttk.Button(left, text="Preview Four Filaments", command=self.refresh_hueforge_preview).pack(fill="x", pady=(12, 3))
-        ttk.Button(left, text="Export HueForge Handoff Folder...", command=self.export_hueforge).pack(fill="x", pady=3)
-        ttk.Button(left, text="Import FlatForge STL Folder...", command=self.import_flatforge_folder).pack(fill="x", pady=3)
-        ttk.Button(left, text="Import HueForge 3MF / STL...", command=self.import_hueforge_file).pack(fill="x", pady=3)
-        ttk.Button(left, text="Export Normalized Face STLs...", command=self.export_face_stls).pack(fill="x", pady=3)
-
-        ttk.Label(
-            right,
-            text=("CardForge prepares the edited full-color artwork. HueForge determines optical blending and layer/color changes. "
-                  "When geometry comes back, CardForge scales only X/Y so HueForge's Z/layer heights are preserved."),
-            wraplength=700, justify="left", font=("Segoe UI", 11)
-        ).pack(anchor="nw")
+        ttk.Button(left, text='Preview Face', command=self.refresh_face_preview).pack(fill='x', pady=4)
+        ttk.Label(left, text='Thirty bundled OFL fonts are available when editing text.', wraplength=300, style='Muted.TLabel').pack(anchor='w', pady=(0, 6))
+        ttk.Button(left, text='Choose Background Color', command=self.pick_face_background).pack(fill='x', pady=4)
+        ttk.Button(left, text='Export Face 3MF + STLs…', command=self.export_face_files).pack(fill='x', pady=4)
+        ttk.Label(right, text='Front layers: flush text and logo inlays. Back layers: a continuous solid sheet. Both sides are flat. Assign colors to named parts in Bambu Studio.', wraplength=680, font=('Segoe UI', 11)).pack(anchor='nw')
+        ttk.Label(right, text='The photo is a layout reference. Scan/retype text and extract or load your logo to create printable elements. No HueForge step is required.', wraplength=680).pack(anchor='nw', pady=8)
 
         self.hf_preview_canvas = tk.Canvas(right, height=360, bg="#242424", highlightthickness=0)
         self.hf_preview_canvas.pack(fill="x", expand=False, pady=(12, 8))
         self.hf_info = tk.Text(right, height=12, wrap="word")
         self.hf_info.pack(fill="both", expand=True)
-        self._set_hf_info("No HueForge / FlatForge geometry imported yet.")
+        self._set_hf_info("Ready to generate the face directly from editable text and logo layers.")
 
     def _assembly_ui(self):
         left = self._scroll_panel(self.assembly_tab)
@@ -698,7 +696,7 @@ class CardForgeApp(tk.Tk):
     def text_dialog(self, index):
         win = tk.Toplevel(self)
         win.title("Text Layer")
-        win.geometry("440x390")
+        win.geometry("560x650")
         win.transient(self)
         layer = self.project.texts[index] if index is not None else TextLayer()
         vars_ = {
@@ -718,11 +716,35 @@ class CardForgeApp(tk.Tk):
             if key == "color":
                 ttk.Button(row, text="Pick", command=lambda: self.pick_text_color(vars_["color"])).pack(side="right", padx=(4, 0))
 
+        choices = bundled_fonts()
+        ttk.Label(win, text=f'Bundled fonts ({len(choices)})').pack(anchor='w', padx=10, pady=(10, 0))
+        chosen = tk.StringVar()
+        fonts = ttk.Combobox(win, state='readonly', values=list(choices), textvariable=chosen)
+        fonts.pack(fill='x', padx=10)
+        fonts.bind('<<ComboboxSelected>>', lambda e: vars_['font'].set(choices[chosen.get()]))
+        for name, path in choices.items():
+            if path == (layer.font_path or default_font()):
+                chosen.set(name)
+        sample = ttk.Label(win)
+        sample.pack(fill='x', padx=10, pady=10)
+        def preview(*args):
+            try:
+                font = ImageFont.truetype(vars_['font'].get() or default_font(), min(60, max(8, int(vars_['size'].get())*2)))
+                im = Image.new('RGB', (520, 85), 'white')
+                ImageDraw.Draw(im).text((12, 42), vars_['text'].get() or 'CardForge — Sample Aa 123', font=font, fill=vars_['color'].get(), anchor='lm')
+                sample.photo = ImageTk.PhotoImage(im)
+                sample.configure(image=sample.photo)
+            except (ValueError, OSError, tk.TclError):
+                pass
+        for key in ('font', 'text', 'size', 'color'):
+            vars_[key].trace_add('write', preview)
+        preview()
+
         def save():
             self._remember()
             new = TextLayer(
                 vars_["text"].get(), float(vars_["x"].get()), float(vars_["y"].get()),
-                int(vars_["size"].get()), vars_["font"].get(), vars_["color"].get()
+                int(vars_["size"].get()), vars_["font"].get() or default_font(), vars_["color"].get()
             )
             if index is None:
                 self.project.texts.append(new)
@@ -967,58 +989,44 @@ class CardForgeApp(tk.Tk):
         if c[1]:
             self.project.hueforge.palette[idx] = c[1].upper()
             self.color_buttons[idx].configure(text=c[1].upper(), bg=c[1])
-            self.refresh_hueforge_preview()
+            self.refresh_face_preview()
 
-    def sync_hueforge_fields(self):
+    def sync_face_fields(self):
         self.project.hueforge.filament_names = [v.get() for v in self.filament_name_vars]
-        self.project.hueforge.face_target_thickness_mm = float(self.face_thickness.get())
-        self.project.hueforge.transparent_cap_mm = float(self.transparent_cap.get())
+        self.project.face.thickness_mm = float(self.face_thickness.get())
+        self.project.face.front_depth_mm = float(self.transparent_cap.get())
+        self.project.hueforge.face_target_thickness_mm = self.project.face.thickness_mm
 
-    def refresh_hueforge_preview(self):
-        im = self.composite_image()
-        if im is None:
-            return
-        self.sync_hueforge_fields()
-        preview = nearest_palette_preview(im, self.project.hueforge.palette)
-        canvas = self.hf_preview_canvas
-        canvas.update_idletasks()
-        w = max(200, canvas.winfo_width())
-        h = max(180, canvas.winfo_height())
-        half = max(100, (w-30)//2)
-        source = im.copy(); mapped = preview.copy()
-        scale = min(half/source.width, (h-40)/source.height)
-        sz = (max(1, int(source.width*scale)), max(1, int(source.height*scale)))
-        source = source.resize(sz, Image.Resampling.LANCZOS)
-        mapped = mapped.resize(sz, Image.Resampling.LANCZOS)
-        p1 = ImageTk.PhotoImage(source); p2 = ImageTk.PhotoImage(mapped)
-        self.preview_photos["hf1"] = p1; self.preview_photos["hf2"] = p2
-        canvas.delete("all")
-        canvas.create_text(10, 12, anchor="w", text="Edited full-color source", fill="white")
-        canvas.create_text(half+20, 12, anchor="w", text="Nearest 4-filament preview (HueForge can blend beyond this)", fill="white")
-        canvas.create_image(10, 30, anchor="nw", image=p1)
-        canvas.create_image(half+20, 30, anchor="nw", image=p2)
+    def pick_face_background(self):
+        color = colorchooser.askcolor(initialcolor=self.project.face.background_color)[1]
+        if color:
+            self._remember()
+            self.project.face.background_color = color
+            self.refresh_face_preview()
 
-    def export_hueforge(self):
+    def refresh_face_preview(self):
+        self.sync_face_fields()
+        g = self.project.geometry
+        im = Image.new('RGB', (1600, round(1600*g.card_height_mm/g.card_width_mm)), self.project.face.background_color)
+        im = compose_editable_layers(im, g.card_width_mm, g.card_height_mm, self.project.texts, self.project.logo)
+        self.show_image_on_canvas(im, self.hf_preview_canvas, 'face')
+        self._set_hf_info(f'{len(self.project.texts)} text layer(s). Logo colors use the four-color palette.\nFront inlays: {self.project.face.front_depth_mm:.2f} mm\nSolid backing: {self.project.face.thickness_mm-self.project.face.front_depth_mm:.2f} mm\nExport produces named parts, ready to assign filaments in Bambu Studio.\nArtwork will be mirrored automatically for face-down printing.')
+
+    def export_face_files(self):
+        self._export_direct(False)
+
+    def _export_direct(self, include_base):
         if self.busy:
             return
-        self.sync_hueforge_fields()
+        self.sync_face_fields()
+        self.apply_logo()
         self.apply_geometry()
-        if not self.project.source_image and not self.project.corrected_image:
-            messagebox.showinfo('CardForge', 'Load a card photo first.')
-            return
-        out = filedialog.askdirectory(title='Choose HueForge handoff folder')
+        out = filedialog.askdirectory(title='Choose CardForge face output folder')
         if not out:
             return
         snapshot = copy.deepcopy(self.project)
-        def work():
-            source = snapshot.cleaned_image or snapshot.corrected_image or snapshot.source_image
-            with Image.open(source) as raw:
-                im = fit_card_image(raw, ratio=snapshot.geometry.card_width_mm / snapshot.geometry.card_height_mm)
-            im = compose_editable_layers(im, snapshot.geometry.card_width_mm,
-                                         snapshot.geometry.card_height_mm, snapshot.texts, snapshot.logo)
-            return export_hueforge_package(im, snapshot, out)
-        self._background('Exporting HueForge files…', work,
-                         lambda result: messagebox.showinfo('CardForge', f'HueForge handoff ready in:\n{result}'))
+        self._background('Generating flush face geometry…', lambda: export_face(snapshot, out, include_base),
+                         lambda result: messagebox.showinfo('CardForge', f'Face files ready in:\n{result}\n\nOpen CardForge_Face.3mf in Bambu Studio and assign filament colors under Objects / Parts.'))
 
     def import_flatforge_folder(self):
         folder = filedialog.askdirectory(title="Select FlatForge STL folder")
@@ -1105,72 +1113,15 @@ class CardForgeApp(tk.Tk):
             messagebox.showinfo("CardForge", f"Base STL saved:\n{p}")
 
     def export_face_blank(self):
-        self.apply_geometry(); self.sync_hueforge_fields()
+        self.apply_geometry(); self.sync_face_fields()
         p = filedialog.asksaveasfilename(defaultextension=".stl", filetypes=[("STL", "*.stl")], initialfile="CardForge_Face_Blank.stl")
         if p:
-            m = make_face_blank(self.project.geometry, self.project.hueforge.face_target_thickness_mm)
+            m = make_face_blank(self.project.geometry, self.project.face.thickness_mm)
             m.export(p, file_type="stl")
             messagebox.showinfo("CardForge", f"Face blank STL saved:\n{p}")
 
     def export_assembly(self):
-        self.apply_geometry(); self.sync_hueforge_fields()
-        out = filedialog.askdirectory(title="Choose complete assembly output folder")
-        if not out:
-            return
-        out = Path(out)
-        out.mkdir(parents=True, exist_ok=True)
-        export_base_stl(out / "01_CardForge_NFC_Base.stl", self.project.geometry, self.project.nfc)
-
-        if self.flatforge_meshes:
-            for i, m in enumerate(self.flatforge_meshes, 1):
-                m.export(out / f"02_Face_ColorVolume_{i:02d}.stl", file_type="stl")
-            face_note = f"{len(self.flatforge_meshes)} normalized HueForge/FlatForge face volume(s) included."
-        else:
-            make_face_blank(self.project.geometry, self.project.hueforge.face_target_thickness_mm).export(out / "02_Face_Blank_TestFit.stl", file_type="stl")
-            face_note = "No HueForge geometry was imported; a thin blank face test-fit STL is included."
-
-        im = self.composite_image()
-        if im is not None:
-            im.save(out / "CardForge_Edited_Source.png")
-            nearest_palette_preview(im, self.project.hueforge.palette).save(out / "CardForge_4Filament_Preview.png")
-
-        fw, fh = face_target_dimensions(self.project.geometry)
-        metadata = {
-            "cardforge_version": "0.4.0",
-            "finished_card_mm": [self.project.geometry.card_width_mm, self.project.geometry.card_height_mm],
-            "face_insert_mm": [fw, fh],
-            "base_thickness_mm": self.project.geometry.base_thickness_mm,
-            "face_recess_depth_mm": self.project.geometry.face_recess_depth_mm,
-            "target_face_thickness_mm": self.project.hueforge.face_target_thickness_mm,
-            "nfc": {
-                "preset": self.project.nfc.preset_name,
-                "diameter_mm": self.project.nfc.diameter_mm,
-                "thickness_mm": self.project.nfc.thickness_mm,
-                "clearance_mm": self.project.nfc.clearance_mm,
-                "x_mm": self.project.nfc.x_mm,
-                "y_mm": self.project.nfc.y_mm,
-            },
-            "filaments": [
-                {"slot": i+1, "name": self.project.hueforge.filament_names[i], "display_color": self.project.hueforge.palette[i]}
-                for i in range(4)
-            ],
-            "face_down": True,
-            "face_note": face_note,
-        }
-        (out / "CardForge_Assembly.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        (out / "README_PRINT.txt").write_text(
-            "CARDFORGE 4D TWO-PIECE PRINT\n\n"
-            "1. Print the HueForge/FlatForge face FACE-DOWN using the layer/color plan from HueForge.\n"
-            "2. Do not scale the HueForge face in Z.\n"
-            "3. Print 01_CardForge_NFC_Base.stl separately.\n"
-            "4. Install the NFC tag in the circular recess.\n"
-            "5. Test-fit the face insert; use a thin adhesive layer if desired.\n"
-            "6. Verify NFC operation before permanent assembly.\n\n"
-            + face_note + "\n",
-            encoding="utf-8"
-        )
-        self.project.save_bundle(out / "CardForge_Project.cardforge")
-        messagebox.showinfo("CardForge", f"Complete assembly folder created:\n{out}")
+        self._export_direct(True)
 
     # ---------- 3D PREVIEW ----------
     def draw_3d_preview(self):
@@ -1229,8 +1180,8 @@ class CardForgeApp(tk.Tk):
         center = proj((n.x_mm,n.y_mm,face_z))
         c.create_text(center[0], center[1], text="NFC", fill="#ffd65a", font=("Segoe UI", 9, "bold"))
 
-        c.create_text(W/2, 22, text="Blue = thin HueForge face insert | Yellow = NFC pocket", fill="white", font=("Segoe UI", 11, "bold"))
-        c.create_text(W/2, H-22, text=f"{g.card_width_mm:.1f} × {g.card_height_mm:.1f} mm | base {g.base_thickness_mm:.2f} mm | face target {self.project.hueforge.face_target_thickness_mm:.2f} mm",
+        c.create_text(W/2, 22, text="Blue = flush face insert | Yellow = NFC pocket", fill="white", font=("Segoe UI", 11, "bold"))
+        c.create_text(W/2, H-22, text=f"{g.card_width_mm:.1f} × {g.card_height_mm:.1f} mm | base {g.base_thickness_mm:.2f} mm | face {self.project.face.thickness_mm:.2f} mm",
                       fill="white", font=("Segoe UI", 10))
 
     # ---------- CHECKS / PROJECT ----------
@@ -1260,9 +1211,9 @@ class CardForgeApp(tk.Tk):
         else:
             ok.append(f"NFC/base floor is {floor:.2f} mm thick.")
 
-        if g.face_recess_depth_mm < h.face_target_thickness_mm:
-            warnings.append(f"Face target ({h.face_target_thickness_mm:.2f} mm) is thicker than recess ({g.face_recess_depth_mm:.2f} mm), so it will stand proud unless adjusted.")
-        elif g.face_recess_depth_mm - h.face_target_thickness_mm > 0.25:
+        if g.face_recess_depth_mm < self.project.face.thickness_mm:
+            warnings.append(f"Face ({self.project.face.thickness_mm:.2f} mm) is thicker than recess ({g.face_recess_depth_mm:.2f} mm), so it will stand proud unless adjusted.")
+        elif g.face_recess_depth_mm - self.project.face.thickness_mm > 0.25:
             warnings.append("Face recess is much deeper than the target face; the insert may sit noticeably below the rim.")
         else:
             ok.append("Face target thickness and recess depth are closely matched.")
@@ -1276,8 +1227,8 @@ class CardForgeApp(tk.Tk):
         else:
             ok.append(f"NFC pocket has {edge:.2f} mm minimum edge wall.")
 
-        if h.face_target_thickness_mm < 0.35:
-            warnings.append("Face target is under 0.35 mm; first-layer consistency becomes critical.")
+        if self.project.face.thickness_mm < 0.35:
+            warnings.append("Face is under 0.35 mm; first-layer consistency becomes critical.")
         else:
             ok.append("Face insert thickness is plausible for a thin face-down print.")
 
@@ -1301,13 +1252,16 @@ class CardForgeApp(tk.Tk):
             if low_ocr:
                 warnings.append(f"{len(low_ocr)} OCR line(s) are below 70% confidence; verify wording before export.")
 
-        if self.flatforge_meshes:
-            zmins = [float(m.bounds[0][2]) for m in self.flatforge_meshes]
-            zmaxs = [float(m.bounds[1][2]) for m in self.flatforge_meshes]
-            zspan = max(zmaxs) - min(zmins)
-            ok.append(f"{len(self.flatforge_meshes)} HueForge/FlatForge volume(s) loaded; imported Z span is {zspan:.3f} mm and is not scaled.")
+        face = self.project.face
+        if face.front_depth_mm < 0.2 or face.thickness_mm-face.front_depth_mm < 0.2:
+            issues.append('Front color and solid backing must each be at least 0.2 mm thick.')
+        if face.thickness_mm > g.face_recess_depth_mm:
+            issues.append('Face is thicker than the base recess.')
+        if not self.project.texts and not self.project.logo.path:
+            warnings.append('No editable text or logo yet. Export will produce a blank face. Photos are references only.')
         else:
-            warnings.append("No HueForge/FlatForge geometry imported yet; assembly export will include a blank face test piece.")
+            ok.append('Text and logo will become flush front-layer inlays, with a solid backing.')
+        warnings.append('Use matching first-layer / layer heights that divide the front depth. Inspect fine lettering in the slicer before printing.')
 
         text = "CARDFORGE 4D PRINTABILITY REPORT\n\n"
         text += "PASS\n" + ("\n".join("✓ " + x for x in ok) if ok else "None") + "\n\n"
@@ -1329,8 +1283,8 @@ class CardForgeApp(tk.Tk):
         self.logo_w.set(self.project.logo.width_mm)
         self.snap_var.set(self.project.editor.snap_mm)
         self.show_nfc_var.set(self.project.editor.show_nfc_guide)
-        self.face_thickness.set(h.face_target_thickness_mm)
-        self.transparent_cap.set(h.transparent_cap_mm)
+        self.face_thickness.set(self.project.face.thickness_mm)
+        self.transparent_cap.set(self.project.face.front_depth_mm)
         for i in range(4):
             self.filament_name_vars[i].set(h.filament_names[i])
             self.color_buttons[i].configure(text=h.palette[i], bg=h.palette[i])
@@ -1347,11 +1301,11 @@ class CardForgeApp(tk.Tk):
         self.sync_ui_from_project()
         for canvas in [self.source_canvas, self.design_canvas, self.hf_preview_canvas]:
             canvas.delete("all")
-        self._set_hf_info("No HueForge / FlatForge geometry imported yet.")
+        self._set_hf_info("Ready to generate the face directly from editable text and logo layers.")
         self.status.set("New project created.")
 
     def save_project(self):
-        self.apply_logo(); self.apply_geometry(); self.sync_hueforge_fields()
+        self.apply_logo(); self.apply_geometry(); self.sync_face_fields()
         p = filedialog.asksaveasfilename(
             defaultextension=".cardforge",
             filetypes=[("Portable CardForge Project", "*.cardforge"), ("Legacy JSON", "*.cardforge.json *.json")]
@@ -1376,14 +1330,13 @@ class CardForgeApp(tk.Tk):
             else:
                 self.project = Project.load(p)
             self.flatforge_meshes = []
-            if self.project.hueforge_import_path and Path(self.project.hueforge_import_path).exists():
-                self.flatforge_meshes = import_hueforge_path(self.project.hueforge_import_path, self.project)
+            # Older project artwork is retained; imported HueForge meshes are no longer used.
             self.sync_ui_from_project()
             if self.project.source_image and Path(self.project.source_image).exists():
                 shown = self.project.corrected_image if self.project.corrected_image and Path(self.project.corrected_image).exists() else self.project.source_image
                 self.show_image_on_canvas(Image.open(shown), self.source_canvas, "source")
                 self.refresh_design_preview()
-                self.refresh_hueforge_preview()
+                self.refresh_face_preview()
             self.status.set(f"Opened {Path(p).name}")
         except Exception as e:
             messagebox.showerror("CardForge", f"Could not open project:\n{e}")
@@ -1408,7 +1361,7 @@ def _undoable(method):
 for _name in ('load_photo', 'auto_correct', 'use_original', 'apply_manual_corners',
               'delete_text', 'load_logo', 'apply_logo', 'clean_logo_background',
               'scale_logo', 'run_ocr', 'restore_photo_background', 'finish_logo_selection',
-              'pick_filament_color', 'apply_geometry', 'sync_hueforge_fields',
+              'pick_filament_color', 'apply_geometry', 'sync_face_fields',
               'new_project', 'open_project', '_import_hueforge_path'):
     setattr(CardForgeApp, _name, _undoable(getattr(CardForgeApp, _name)))
 

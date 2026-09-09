@@ -1,13 +1,13 @@
-CardForge 4D 0.4.1 Alpha
+CardForge 4D 0.6 Alpha
 
-The GitHub Windows workflow runs the core smoke test, regression tests and
-source runtime test, then builds and tests CardForge4D.exe before publishing.
-Each successful release includes exe-test.json with the packaged test results.
+The Windows workflow runs source tests, then builds and tests the extracted
+folder application. It also runs Microsoft Defender against the app when the
+runner provides Defender and records the result in defender-scan.json.
 
-Tests cover synthetic perspective correction, image composition, logo helpers,
-watertight and oriented NFC geometry, cavity depth, transformed 3MF instances,
-portable project geometry, GUI startup and real OCR with networking disabled.
+Tests cover direct face solids, named multipart 3MF output, flat exterior
+faces, four-color mapping, 30 bundled fonts, GUI controls, responsive export,
+offline OCR, geometry and portable projects.
 
-Not validated: physical printing on the Bambu A1, NFC radio performance after
-assembly, and a production HueForge/FlatForge round-trip. The 3D preview is
-schematic. Review OCR text and test-fit your actual tag and face before gluing.
+Not validated: physical printing on a Bambu A1, NFC radio performance after
+assembly, fine-feature readability with a particular nozzle, or production
+fit with a user's tag. Review the slicer preview and test print before gluing.

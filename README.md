@@ -1,142 +1,27 @@
-# CardForge 4D 0.5 Alpha
+# CardForge 4D 0.6 Alpha
 
-Download **CardForge4D-Windows.zip** from [Releases](https://github.com/curtispassley-hue/card-forge/releases). Choose **Extract All**, then open `CardForge4D/CardForge4D.exe`. Keep the `_internal` folder beside the EXE. Python is not required. Do not run inside the ZIP or copy the EXE alone.
+CardForge turns a photographed business card into a two-piece, NFC-enabled card for the Bambu Lab A1. It now generates the face directly; HueForge is not required.
 
-This replaces the earlier self-extracting single EXE, which was reported as a virus on the user's PC. No antivirus settings are changed. A Defender scan report is published with each build; an unavailable scan is explicitly recorded. The app is unsigned and a clean runner scan does not guarantee every PC will accept it. If Windows blocks it, leave protection enabled and submit it to Microsoft for review: https://www.microsoft.com/en-us/wdsi/filesubmission
+Download **CardForge4D-Windows.zip** from [Releases](https://github.com/curtispassley-hue/card-forge/releases). Choose **Extract All**, then launch `CardForge4D/CardForge4D.exe`. Keep the `_internal` folder beside the EXE. Python is not required. Do not run the EXE from inside the ZIP or copy it out by itself.
 
-## Changes in 0.5
+The face is a named multipart 3MF and an aligned STL set for Bambu Studio. The background and solid backing are continuous, while editable text and the logo occupy only the front layers. All parts meet flush; both exterior faces are flat. Open `CardForge_Face.3mf` in Bambu Studio and assign filaments under Objects / Parts. If using STLs, load every file in `Aligned_STLs` together as one multipart object and do not auto-arrange them. The model is mirrored for artwork-side-down printing already.
 
-- HueForge export works in the background with activity feedback and visible errors.
-- Palette preview uses bounded chunks to reduce peak memory.
-- Logo width and Smaller/Larger controls preserve aspect ratio.
-- Remove Logo Background handles plain border-connected backgrounds and preserves transparency; tolerance is adjustable.
-- Undo / Redo buttons and Ctrl+Z / Ctrl+Y restore edits. Artwork revisions are preserved so background removal can be undone.
-- Next / Back buttons, clearer tabs, cleaner spacing and scrollable editing panels.
+The default face is 0.8 mm: 0.4 mm of front color inlays and 0.4 mm of solid backing. The face must fit the base recess. Print the NFC base separately, install the tag, test-fit the face, and glue only after checking the fit. Inspect small lettering in Bambu Studio before printing.
 
-The workflow tests the actual folder application, including export responsiveness, logo controls, undo/redo and step navigation.
+## Editing workflow
 
-CardForge 4D converts a photographed business card into a two-piece 3D-printable NFC card workflow designed around a Bambu Lab A1 / AMS Lite and HueForge / FlatForge.
+1. Load and perspective-correct the card photo. The photo is a layout reference.
+2. Scan text offline or add/edit text manually. Text becomes its own geometry part.
+3. Load or extract a logo, scale it, remove its plain background, and choose the four palette colors. Logo color regions become their own geometry parts.
+4. Use Next / Back to move through Photo, Edit, Face / Colors, NFC / Assembly, and Printability. Undo / Redo and Ctrl+Z / Ctrl+Y restore edits.
+5. Export the face 3MF/STLs and the NFC base. No HueForge step is needed.
 
-The physical idea is intentionally simple:
+Thirty bundled sample fonts are included under the SIL Open Font License, each with its license file. The Windows release downloads this pinned library during its build, and a source checkout can recreate it with `python scripts/fetch_fonts.py`. They are available from the text editor's font picker and do not need to be installed in Windows. A custom TTF/OTF can still be selected.
 
-1. **Face** – a very thin HueForge/FlatForge print, printed face-down against the build plate so optical filament blending can create a much wider apparent color range from four actual filaments.
-2. **Base** – a structural business-card-sized part containing the circular NFC recess and a shallow inset for the face.
+Offline OCR uses RapidOCR and ONNX Runtime. OCR and background removal are assistants and should be reviewed. Transparent and antialiased logo edges are thresholded into the selected four colors.
 
-Default finished X/Y size is **88.9 × 50.8 mm**. Z thickness is intentionally much greater than a paper business card and is user-adjustable.
+The Windows package is an extracted-folder application rather than a self-extracting one-file executable because unsigned one-file PyInstaller bundles can trigger antivirus heuristics. The build runs Microsoft Defender on the extracted app and publishes `defender-scan.json`; protection is never disabled. The package is unsigned, so no antivirus result can be guaranteed for every computer. If Windows blocks it, leave protection enabled and submit the file to Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission
 
-## 0.4 additions
+Automated tests cover direct face geometry, watertight parts, flat exterior faces, named multipart 3MF output, four-color mapping, 30 bundled fonts, OCR, project round-trips, logo tools, undo/redo, navigation, GUI startup, and responsive export. Physical A1 printing and production NFC fit still require a test print.
 
-### Offline OCR-assisted text editing
-
-CardForge now has an offline OCR module built around **RapidOCR + ONNX Runtime**. The Windows build bundles the OCR models inside the application, so the receiving PC does not need Tesseract, an OCR server, or an administrator installation.
-
-`Scan Text (Offline OCR)`:
-
-- scans the corrected card image,
-- turns recognized text lines into editable CardForge text layers,
-- estimates line position, approximate point size, and ink color,
-- records OCR confidence,
-- removes the photographed text from the background with an inpainting clean-plate pass,
-- flags lower-confidence OCR lines in the printability report.
-
-OCR is an assistant, not a guarantee. Business cards with unusual fonts, foil, gradients, glare, tiny text, or curved lettering should still be reviewed manually before printing.
-
-### Editable logo extraction
-
-`Extract Logo From Card` lets you drag a rectangle around a logo on the preview. CardForge:
-
-- crops the selected logo,
-- estimates the local background and creates transparency,
-- removes the photographed logo region from the background,
-- places the extracted logo back as a movable/resizable editable layer.
-
-For best quality, replace an extracted logo with the company's original transparent PNG when one is available.
-
-### Portable project files
-
-The new default project format is **`.cardforge`**. It is a ZIP-based project bundle containing the project JSON plus current source/corrected/cleaned image assets and extracted logo. This fixes the temporary-file problem in earlier alphas and makes projects much safer to reopen or share.
-
-Legacy `.cardforge.json` / `.json` projects are still readable.
-
-## Existing 0.3 features retained
-
-- automatic business-card detection and perspective correction,
-- manual four-corner perspective correction,
-- centered business-card crop fallback,
-- editable text wording/font/size/color/position,
-- direct drag positioning of text and logo,
-- configurable four physical filament colors and names,
-- full-color HueForge handoff image,
-- nearest-four-filament preview,
-- HueForge/FlatForge STL-folder import,
-- HueForge/FlatForge 3MF import,
-- X/Y-only normalization of imported HueForge geometry,
-- strict preservation of HueForge Z/layer heights,
-- standard 88.9 × 50.8 mm card size with editable dimensions,
-- circular NFC presets plus custom size/thickness/clearance/X/Y,
-- separate watertight NFC base STL,
-- thin face test-fit STL,
-- rotatable assembly preview,
-- assembly-folder export,
-- printability checks,
-- Windows PyInstaller build configuration,
-- GitHub Actions Windows build workflow.
-
-## Recommended workflow
-
-1. Photograph or scan a business card.
-2. Load it in CardForge and run automatic perspective correction.
-3. If necessary, use manual four-corner correction.
-4. Run Offline OCR and verify every recognized text line.
-5. Change fonts, wording, sizes, positions, and colors as needed.
-6. Extract or replace the logo.
-7. Choose the four actual filaments installed on the A1 / AMS Lite.
-8. Export the HueForge handoff folder.
-9. Open `CardForge_HueForge_Source.png` in HueForge.
-10. Configure those same four filaments and tune HueForge's optical blending / transmission settings.
-11. Export a FlatForge face-down STL set or supported multi-volume 3MF.
-12. Import that geometry back into CardForge.
-13. Configure the NFC tag and base dimensions.
-14. Run Printability Checks.
-15. Export the complete assembly folder.
-16. Print the HueForge face face-down and the NFC base separately.
-17. Install/test the NFC tag and fit the thin face into the base.
-
-## Why CardForge does not replace HueForge
-
-CardForge handles the business-card-specific job: perspective, editable text/logo, physical dimensions, NFC base, assembly, printability, and exchange files. HueForge remains the authoritative optical-blending and layer/color planning stage. CardForge deliberately preserves imported HueForge Z dimensions because changing layer heights can change the appearance of the blended image.
-
-## Build the Windows executable
-
-On a Windows 10/11 development PC:
-
-1. Install 64-bit Python 3.12 for the current user. Administrator rights are not required.
-2. Double-click `build_windows.bat`.
-3. The script creates a local `.venv`, installs dependencies, runs the smoke tests, and builds:
-
-`dist\CardForge4D.exe`
-
-The finished EXE is configured **not** to request administrator privileges and includes the offline OCR runtime/models. It will be larger than the previous alpha because ONNX Runtime and OCR model files are bundled.
-
-An unsigned executable distributed over the internet can still trigger Windows SmartScreen reputation warnings. That is separate from administrator privileges; a production release should eventually be code-signed.
-
-## GitHub build
-
-`.github/workflows/build-windows.yml` builds and uploads both:
-
-- `CardForge4D.exe`
-- `CardForge4D-Windows.zip`
-
-This is the preferred reproducible Windows release route once the project is in a GitHub repository.
-
-## Current alpha limitations
-
-- OCR font-family identification is not automatic. OCR makes the wording editable, but the user selects the desired TTF/OTF font.
-- Logo extraction is background-estimation based rather than full semantic AI segmentation.
-- HueForge is still a handoff/import workflow; CardForge does not modify proprietary HueForge project internals.
-- Interactive 3D preview is schematic rather than a full GPU mesh renderer.
-- The application is not code-signed yet.
-
-## Next target
-
-The next development target is 0.5: OCR review/acceptance UI, font matching assistance, better logo/background segmentation, per-object hiding/locking, filament-library presets, and a Windows CI-produced executable for hands-on testing.
+The original HueForge import helpers remain only for opening older 0.4 projects; they are not part of the new face export workflow.
