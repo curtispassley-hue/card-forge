@@ -15,7 +15,7 @@ from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 from .core.project import Project, TextLayer
-from .core.face import export_face
+from .core.face import export_face, export_logo
 from .core.fonts import bundled_fonts, default_font
 from .core.ocr import backend_status, ocr_candidates, remove_ocr_text, candidates_to_text_layers, OCRCandidate
 from .core.logo import extract_logo, remove_logo_region, suggest_logo_regions, remove_logo_background
@@ -82,13 +82,26 @@ class CardForgeApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use('clam')
         style.configure('.', font=('Segoe UI', 10), background='#f3f5f8', foreground='#243247')
-        style.configure('TButton', padding=(10, 7))
-        style.configure('Accent.TButton', background='#245edb', foreground='white')
-        style.map('Accent.TButton', background=[('active', '#1b4bb1')])
+        style.configure('TButton', padding=(10, 7), relief='flat')
+        style.configure('Accent.TButton', background='#245edb', foreground='white', padding=(12, 8), font=('Segoe UI', 10, 'bold'))
+        style.map('Accent.TButton', background=[('active', '#1b4bb1'), ('disabled', '#9bb4e8')])
+        style.configure('Secondary.TButton', background='#e7edf7', foreground='#203451', padding=(10, 7))
+        style.map('Secondary.TButton', background=[('active', '#d5e1f4')])
+        style.configure('Danger.TButton', background='#fbe8e8', foreground='#9b2c2c', padding=(10, 7))
+        style.map('Danger.TButton', background=[('active', '#f4d0d0')])
         style.configure('Title.TLabel', font=('Segoe UI', 21, 'bold'))
+        style.configure('Step.TLabel', font=('Segoe UI', 10, 'bold'), foreground='#245edb')
+        style.configure('Section.TLabelframe', background='#ffffff', borderwidth=1, relief='solid', padding=8)
+        style.configure('Section.TLabelframe.Label', background='#ffffff', foreground='#1e3a5f', font=('Segoe UI', 11, 'bold'))
         style.configure('Muted.TLabel', foreground='#64748b')
         style.configure('TNotebook.Tab', padding=(16, 10))
+        style.map('TNotebook.Tab', foreground=[('selected', '#245edb')])
         style.configure('TLabelframe', padding=8)
+
+    def _button(self, parent, label, command, icon='', style='Secondary.TButton'):
+        """Create a consistent, compact action button with a safe text icon."""
+        caption = f'{icon}  {label}' if icon else label
+        return ttk.Button(parent, text=caption, command=command, style=style)
 
     def _scroll_panel(self, parent):
         shell = ttk.Frame(parent, width=310)
@@ -171,8 +184,47 @@ class CardForgeApp(tk.Tk):
         with Image.open(self.project.logo.path) as im:
             remove_logo_background(im, float(self.bg_tolerance.get())).save(out)
         self.project.logo.path = str(out)
+        self.project.logo.enabled = True
+        self.logo_enabled_var.set(True)
+        self.refresh_logo_preview()
         self.refresh_design_preview()
         self.status.set('Logo background removed. Undo restores the original.')
+
+    def refresh_logo_preview(self):
+        """Show a small checkerboard preview so transparency edits are obvious."""
+        canvas = getattr(self, 'logo_preview_canvas', None)
+        if canvas is None:
+            return
+        canvas.delete('all')
+        path = self.project.logo.path
+        if not path or not Path(path).exists():
+            canvas.create_text(140, 62, text='Load or extract a logo', fill='#64748b')
+            if hasattr(self, 'logo_file_var'):
+                self.logo_file_var.set('No logo loaded')
+            return
+        try:
+            with Image.open(path) as source:
+                logo = source.convert('RGBA')
+            cw = max(120, int(canvas.winfo_width() or 278) - 8)
+            ch = max(80, int(canvas.winfo_height() or 126) - 8)
+            logo.thumbnail((cw, ch), Image.Resampling.LANCZOS)
+            board = Image.new('RGBA', (cw, ch), '#f5f7fb')
+            draw = ImageDraw.Draw(board)
+            tile = 12
+            for y in range(0, ch, tile):
+                for x in range(0, cw, tile):
+                    if ((x // tile) + (y // tile)) % 2:
+                        draw.rectangle((x, y, x + tile, y + tile), fill='#d9e1ec')
+            board.alpha_composite(logo, ((cw - logo.width) // 2, (ch - logo.height) // 2))
+            photo = ImageTk.PhotoImage(board.convert('RGB'))
+            canvas.create_image(cw // 2 + 4, ch // 2 + 4, image=photo)
+            canvas.image_ref = photo
+            if hasattr(self, 'logo_file_var'):
+                self.logo_file_var.set(f'{Path(path).name}  •  {logo.width} × {logo.height}px')
+        except Exception as exc:
+            canvas.create_text(140, 62, text='Logo preview unavailable', fill='#9b2c2c')
+            if hasattr(self, 'logo_file_var'):
+                self.logo_file_var.set(f'Could not preview logo: {exc}')
 
     def _background(self, label, work, done):
         if self.busy:
@@ -218,10 +270,10 @@ class CardForgeApp(tk.Tk):
         header = ttk.Frame(self, padding=(18, 12))
         header.pack(fill='x')
         ttk.Label(header, text='CardForge 4D', style='Title.TLabel').pack(side='left')
-        ttk.Label(header, text='PHOTO  /  DESIGN  /  PRINT', style='Muted.TLabel').pack(side='left', padx=20)
-        self.undo_button = ttk.Button(header, text='Undo', command=self.undo)
+        ttk.Label(header, text='PHOTO  ›  DESIGN  ›  PRINT', style='Step.TLabel').pack(side='left', padx=20)
+        self.undo_button = self._button(header, 'Undo', self.undo, '↶')
         self.undo_button.pack(side='right', padx=4)
-        self.redo_button = ttk.Button(header, text='Redo', command=self.redo)
+        self.redo_button = self._button(header, 'Redo', self.redo, '↷')
         self.redo_button.pack(side='right', padx=4)
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
@@ -246,11 +298,11 @@ class CardForgeApp(tk.Tk):
 
         nav = ttk.Frame(self, padding=(18, 8))
         nav.pack(fill='x')
-        self.back_button = ttk.Button(nav, text='Back', command=lambda: self.navigate(-1))
+        self.back_button = self._button(nav, 'Back', lambda: self.navigate(-1), '‹')
         self.back_button.pack(side='left')
-        self.step_label = ttk.Label(nav, style='Muted.TLabel')
+        self.step_label = ttk.Label(nav, style='Step.TLabel')
         self.step_label.pack(side='left', padx=16)
-        self.next_button = ttk.Button(nav, text='Next', style='Accent.TButton', command=lambda: self.navigate(1))
+        self.next_button = self._button(nav, 'Next', lambda: self.navigate(1), '›', 'Accent.TButton')
         self.next_button.pack(side='right')
         self.progress = ttk.Progressbar(self, mode='indeterminate')
         self.progress.pack(fill='x', padx=18)
@@ -260,14 +312,15 @@ class CardForgeApp(tk.Tk):
         controls = ttk.Frame(self.source_tab)
         controls.pack(side="left", fill="y", padx=(0, 10))
         ttk.Label(controls, text="Business-card photo", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        ttk.Button(controls, text="Load Photo...", command=self.load_photo).pack(fill="x", pady=(12, 4))
-        ttk.Button(controls, text="Auto Perspective Correct", command=self.auto_correct).pack(fill="x", pady=4)
+        ttk.Label(controls, text="Start with a clear, front-facing photo.", style='Muted.TLabel').pack(anchor='w', pady=(4, 8))
+        self._button(controls, "Load Photo...", self.load_photo, '▣', 'Accent.TButton').pack(fill="x", pady=(4, 4))
+        self._button(controls, "Auto Perspective Correct", self.auto_correct, '◇').pack(fill="x", pady=4)
         ttk.Separator(controls).pack(fill="x", pady=8)
-        ttk.Button(controls, text="Manual 4-Corner Mode", command=self.start_manual_corners).pack(fill="x", pady=3)
-        ttk.Button(controls, text="Apply Manual Corners", command=self.apply_manual_corners).pack(fill="x", pady=3)
-        ttk.Button(controls, text="Reset Corner Points", command=self.reset_manual_corners).pack(fill="x", pady=3)
+        self._button(controls, "Manual 4-Corner Mode", self.start_manual_corners, '⌖').pack(fill="x", pady=3)
+        self._button(controls, "Apply Manual Corners", self.apply_manual_corners, '✓').pack(fill="x", pady=3)
+        self._button(controls, "Reset Corner Points", self.reset_manual_corners, '×', 'Danger.TButton').pack(fill="x", pady=3)
         ttk.Separator(controls).pack(fill="x", pady=8)
-        ttk.Button(controls, text="Use Centered Crop", command=self.use_original).pack(fill="x", pady=3)
+        self._button(controls, "Use Centered Crop", self.use_original, '□').pack(fill="x", pady=3)
         ttk.Label(
             controls,
             text=("Manual mode: click the four visible card corners in any order. "
@@ -288,35 +341,48 @@ class CardForgeApp(tk.Tk):
         right.pack(side="right", fill="both", expand=True)
 
         ttk.Label(left, text="Editable layers", font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        ttk.Label(left, text="Build the front from clean text and logo parts.", style='Muted.TLabel', wraplength=285).pack(anchor='w', pady=(4, 8))
         self.text_list = tk.Listbox(left, width=34, height=6)
         self.text_list.pack(fill="x", pady=(10, 4))
-        ttk.Button(left, text="Add Text Layer", command=self.add_text).pack(fill="x", pady=2)
-        ttk.Button(left, text="Edit Selected Text", command=self.edit_selected_text).pack(fill="x", pady=2)
-        ttk.Button(left, text="Delete Selected Text", command=self.delete_text).pack(fill="x", pady=2)
-        ttk.Button(left, text="Scan Text (Offline OCR)", command=self.run_ocr).pack(fill="x", pady=(8, 2))
-        ttk.Button(left, text="Restore Photo Background", command=self.restore_photo_background).pack(fill="x", pady=2)
+        self._button(left, "Add Text Layer", self.add_text, '＋', 'Accent.TButton').pack(fill="x", pady=2)
+        self._button(left, "Edit Selected Text", self.edit_selected_text, '✎').pack(fill="x", pady=2)
+        self._button(left, "Delete Selected Text", self.delete_text, '×', 'Danger.TButton').pack(fill="x", pady=2)
+        self._button(left, "Scan Text (Offline OCR)", self.run_ocr, '⌕').pack(fill="x", pady=(8, 2))
+        self._button(left, "Restore Photo Background", self.restore_photo_background, '↺').pack(fill="x", pady=2)
         self.ocr_status_var = tk.StringVar(value="OCR backend not checked")
         ttk.Label(left, textvariable=self.ocr_status_var, wraplength=285, justify="left").pack(anchor="w", pady=(4, 2))
 
         ttk.Separator(left).pack(fill="x", pady=10)
-        ttk.Label(left, text="Logo").pack(anchor="w")
-        ttk.Button(left, text="Load / Replace Logo...", command=self.load_logo).pack(fill="x", pady=2)
-        ttk.Button(left, text="Auto Find Logo Candidate", command=self.auto_find_logo).pack(fill="x", pady=2)
-        ttk.Button(left, text="Extract Logo From Card", command=self.start_logo_selection).pack(fill="x", pady=2)
+        logo_frame = ttk.LabelFrame(left, text="Logo editor", style='Section.TLabelframe')
+        logo_frame.pack(fill='x', pady=(0, 8))
+        ttk.Label(logo_frame, text="Preview the cutout, then position and size it on the card.", style='Muted.TLabel', wraplength=260).pack(anchor='w', pady=(0, 6))
+        self.logo_preview_canvas = tk.Canvas(logo_frame, height=126, width=278, bg='#e8edf4', highlightthickness=0)
+        self.logo_preview_canvas.pack(fill='x', pady=(0, 7))
+        self.logo_file_var = tk.StringVar(value='No logo loaded')
+        ttk.Label(logo_frame, textvariable=self.logo_file_var, style='Muted.TLabel', wraplength=260).pack(anchor='w', pady=(0, 6))
+        self._button(logo_frame, "Load / Replace Logo...", self.load_logo, '▣').pack(fill="x", pady=2)
+        self._button(logo_frame, "Auto Find Logo Candidate", self.auto_find_logo, '⌕').pack(fill="x", pady=2)
+        self._button(logo_frame, "Extract Logo From Card", self.start_logo_selection, '✂').pack(fill="x", pady=2)
+        self.logo_enabled_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(logo_frame, text='Include logo in face export', variable=self.logo_enabled_var,
+                        command=self.apply_logo).pack(anchor='w', pady=(6, 2))
         self.logo_x = tk.DoubleVar()
         self.logo_y = tk.DoubleVar()
         self.logo_w = tk.DoubleVar()
         for label, var in [("Logo X mm", self.logo_x), ("Logo Y mm", self.logo_y), ("Logo width mm", self.logo_w)]:
-            self._field(left, label, var)
-        ttk.Button(left, text="Apply Logo Position / Size", command=self.apply_logo).pack(fill="x", pady=4)
-        scale_row = ttk.Frame(left)
+            self._field(logo_frame, label, var)
+        self.logo_opacity = tk.DoubleVar(value=100)
+        self._field(logo_frame, "Logo opacity %", self.logo_opacity)
+        self._button(logo_frame, "Apply Position / Size", self.apply_logo, '✓').pack(fill="x", pady=4)
+        scale_row = ttk.Frame(logo_frame)
         scale_row.pack(fill='x')
-        ttk.Button(scale_row, text='Smaller −', command=lambda: self.scale_logo(0.9)).pack(side='left', expand=True, fill='x')
-        ttk.Button(scale_row, text='Larger +', command=lambda: self.scale_logo(1.1)).pack(side='left', expand=True, fill='x')
+        self._button(scale_row, 'Smaller', lambda: self.scale_logo(0.9), '−').pack(side='left', expand=True, fill='x', padx=(0, 2))
+        self._button(scale_row, 'Larger', lambda: self.scale_logo(1.1), '＋').pack(side='left', expand=True, fill='x', padx=(2, 0))
         self.bg_tolerance = tk.DoubleVar(value=34)
-        self._field(left, 'Background tolerance', self.bg_tolerance)
-        ttk.Button(left, text='Remove Logo Background', command=self.clean_logo_background).pack(fill='x', pady=4)
-        ttk.Label(left, text='Best for a plain background. Undo restores the original.', wraplength=260, style='Muted.TLabel').pack(anchor='w')
+        self._field(logo_frame, 'Background tolerance', self.bg_tolerance)
+        self._button(logo_frame, 'Remove Logo Background', self.clean_logo_background, '◎', 'Secondary.TButton').pack(fill='x', pady=4)
+        self._button(logo_frame, 'Create Logo STL…', self.export_logo_stl, '⇩', 'Accent.TButton').pack(fill='x', pady=(2, 4))
+        ttk.Label(logo_frame, text='Background removal is reversible with Undo. Logo STL exports named color parts plus one combined STL.', wraplength=260, style='Muted.TLabel').pack(anchor='w')
 
         ttk.Separator(left).pack(fill="x", pady=10)
         self.snap_var = tk.DoubleVar(value=0.25)
@@ -336,7 +402,7 @@ class CardForgeApp(tk.Tk):
         self.design_canvas.bind("<ButtonPress-1>", self.design_press)
         self.design_canvas.bind("<B1-Motion>", self.design_drag)
         self.design_canvas.bind("<ButtonRelease-1>", self.design_release)
-        ttk.Button(right, text="Refresh Edited Preview", command=self.refresh_design_preview).pack(anchor="e", pady=(8, 0))
+        self._button(right, "Refresh Edited Preview", self.refresh_design_preview, '↻').pack(anchor="e", pady=(8, 0))
 
     def _face_ui(self):
         left = ttk.Frame(self.hf_tab)
@@ -364,10 +430,10 @@ class CardForgeApp(tk.Tk):
         self._field(left, "Total face thickness mm", self.face_thickness)
         self._field(left, "Front color depth mm", self.transparent_cap)
 
-        ttk.Button(left, text='Preview Face', command=self.refresh_face_preview).pack(fill='x', pady=4)
+        self._button(left, 'Preview Face', self.refresh_face_preview, '◉').pack(fill='x', pady=4)
         ttk.Label(left, text='Thirty bundled OFL fonts are available when editing text.', wraplength=300, style='Muted.TLabel').pack(anchor='w', pady=(0, 6))
-        ttk.Button(left, text='Choose Background Color', command=self.pick_face_background).pack(fill='x', pady=4)
-        ttk.Button(left, text='Export Face 3MF + STLs…', command=self.export_face_files).pack(fill='x', pady=4)
+        self._button(left, 'Choose Background Color', self.pick_face_background, '●').pack(fill='x', pady=4)
+        self._button(left, 'Export Face 3MF + STLs…', self.export_face_files, '⇩', 'Accent.TButton').pack(fill='x', pady=4)
         ttk.Label(right, text='Front layers: flush text and logo inlays. Back layers: a continuous solid sheet. Both sides are flat. Assign colors to named parts in Bambu Studio.', wraplength=680, font=('Segoe UI', 11)).pack(anchor='nw')
         ttk.Label(right, text='The photo is a layout reference. Scan/retype text and extract or load your logo to create printable elements. No HueForge step is required.', wraplength=680).pack(anchor='nw', pady=8)
 
@@ -414,10 +480,10 @@ class CardForgeApp(tk.Tk):
             v = tk.DoubleVar(); self.vars[key] = v; self._field(left, label, v)
 
         ttk.Label(left, text="Preset thicknesses are starting points—measure your actual tag.", wraplength=285).pack(anchor="w", pady=(2, 8))
-        ttk.Button(left, text="Apply Dimensions", command=self.apply_geometry).pack(fill="x", pady=3)
-        ttk.Button(left, text="Export NFC Base STL...", command=self.export_base).pack(fill="x", pady=3)
-        ttk.Button(left, text="Export Thin Face Blank STL...", command=self.export_face_blank).pack(fill="x", pady=3)
-        ttk.Button(left, text="Export Complete Assembly Folder...", command=self.export_assembly).pack(fill="x", pady=3)
+        self._button(left, "Apply Dimensions", self.apply_geometry, '✓').pack(fill="x", pady=3)
+        self._button(left, "Export NFC Base STL...", self.export_base, '⇩').pack(fill="x", pady=3)
+        self._button(left, "Export Thin Face Blank STL...", self.export_face_blank, '⇩').pack(fill="x", pady=3)
+        self._button(left, "Export Complete Assembly Folder...", self.export_assembly, '⇩', 'Accent.TButton').pack(fill="x", pady=3)
 
         top = ttk.Frame(right)
         top.pack(fill="x")
@@ -437,7 +503,7 @@ class CardForgeApp(tk.Tk):
         top = ttk.Frame(self.check_tab)
         top.pack(fill="x")
         ttk.Label(top, text="Printability report", font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Button(top, text="Run Checks", command=self.run_checks).pack(side="right")
+        self._button(top, "Run Checks", self.run_checks, '✓').pack(side="right")
         self.check_text = tk.Text(self.check_tab, wrap="word", font=("Consolas", 10))
         self.check_text.pack(fill="both", expand=True, pady=(10, 0))
 
@@ -769,12 +835,21 @@ class CardForgeApp(tk.Tk):
         p = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp"), ("All files", "*.*")])
         if p:
             self.project.logo.path = p
+            self.project.logo.enabled = True
+            self.logo_enabled_var.set(True)
+            self.refresh_logo_preview()
             self.refresh_design_preview()
+            self.status.set(f'Loaded logo: {Path(p).name}')
 
     def apply_logo(self):
         self.project.logo.x_mm = float(self.logo_x.get())
         self.project.logo.y_mm = float(self.logo_y.get())
         self.project.logo.width_mm = max(0.5, float(self.logo_w.get()))
+        if hasattr(self, 'logo_opacity'):
+            self.project.logo.opacity = int(max(0, min(100, float(self.logo_opacity.get()))) * 2.55)
+        if hasattr(self, 'logo_enabled_var'):
+            self.project.logo.enabled = bool(self.logo_enabled_var.get())
+        self.refresh_logo_preview()
         self.refresh_design_preview()
 
     def design_press(self, event):
@@ -961,6 +1036,7 @@ class CardForgeApp(tk.Tk):
             out = self.tempdir / (uuid.uuid4().hex + "_extracted_logo.png")
             extract_logo(im, (start, end), out)
             self.project.logo.path = str(out)
+            self.project.logo.enabled = True
             self.project.logo.source_rect_px = [[float(x0), float(y0)], [float(x1), float(y1)]]
 
             xa, xb = sorted((x0, x1)); ya, yb = sorted((y0, y1))
@@ -978,6 +1054,8 @@ class CardForgeApp(tk.Tk):
             self.logo_x.set(self.project.logo.x_mm)
             self.logo_y.set(self.project.logo.y_mm)
             self.logo_w.set(self.project.logo.width_mm)
+            self.logo_enabled_var.set(True)
+            self.refresh_logo_preview()
             self.refresh_design_preview()
             self.status.set("Logo extracted to a transparent editable layer. Drag it or replace it with an original logo file.")
         except Exception as e:
@@ -1014,6 +1092,28 @@ class CardForgeApp(tk.Tk):
 
     def export_face_files(self):
         self._export_direct(False)
+
+    def export_logo_stl(self):
+        """Create a standalone logo package without rebuilding the card base."""
+        if self.busy:
+            return
+        if not self.project.logo.path or not Path(self.project.logo.path).exists():
+            messagebox.showinfo('CardForge', 'Load or extract a logo first.')
+            return
+        self.apply_logo()
+        out = filedialog.askdirectory(title='Choose standalone logo output folder')
+        if not out:
+            return
+        snapshot = copy.deepcopy(self.project)
+        self._background(
+            'Creating logo geometry…',
+            lambda: export_logo(snapshot, out),
+            lambda result: messagebox.showinfo(
+                'CardForge',
+                f'Logo files ready in:\n{result}\n\n'
+                'Open CardForge_Logo.3mf for named color parts, or use Logo_STLs together as one multipart object.'
+            ),
+        )
 
     def _export_direct(self, include_base):
         if self.busy:
@@ -1281,6 +1381,9 @@ class CardForgeApp(tk.Tk):
         self.logo_x.set(self.project.logo.x_mm)
         self.logo_y.set(self.project.logo.y_mm)
         self.logo_w.set(self.project.logo.width_mm)
+        self.logo_opacity.set(self.project.logo.opacity / 2.55)
+        self.logo_enabled_var.set(self.project.logo.enabled)
+        self.refresh_logo_preview()
         self.snap_var.set(self.project.editor.snap_mm)
         self.show_nfc_var.set(self.project.editor.show_nfc_guide)
         self.face_thickness.set(self.project.face.thickness_mm)
@@ -1301,6 +1404,7 @@ class CardForgeApp(tk.Tk):
         self.sync_ui_from_project()
         for canvas in [self.source_canvas, self.design_canvas, self.hf_preview_canvas]:
             canvas.delete("all")
+        self.refresh_logo_preview()
         self._set_hf_info("Ready to generate the face directly from editable text and logo layers.")
         self.status.set("New project created.")
 

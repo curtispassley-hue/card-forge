@@ -12,9 +12,9 @@ The default face is 0.8 mm: 0.4 mm of front color inlays and 0.4 mm of solid bac
 
 1. Load and perspective-correct the card photo. The photo is a layout reference.
 2. Scan text offline or add/edit text manually. Text becomes its own geometry part.
-3. Load or extract a logo, scale it, remove its plain background, and choose the four palette colors. Logo color regions become their own geometry parts.
+3. Load or extract a logo, preview its transparency, scale/position it, remove its plain background, and choose the four palette colors. Logo color regions become their own geometry parts. Use **Create Logo STL…** when you want only the logo parts.
 4. Use Next / Back to move through Photo, Edit, Face / Colors, NFC / Assembly, and Printability. Undo / Redo and Ctrl+Z / Ctrl+Y restore edits.
-5. Export the face 3MF/STLs and the NFC base. No HueForge step is needed.
+5. Export the face 3MF/STLs, a standalone logo STL package when needed, and the NFC base. No HueForge step is needed.
 
 Thirty bundled sample fonts are included under the SIL Open Font License, each with its license file. The Windows release downloads this pinned library during its build, and a source checkout can recreate it with `python scripts/fetch_fonts.py`. They are available from the text editor's font picker and do not need to be installed in Windows. A custom TTF/OTF can still be selected.
 

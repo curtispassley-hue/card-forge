@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 from cardforge.core.logo import remove_logo_background
 from cardforge.core.image_processing import nearest_palette_preview, hex_to_rgb
 from cardforge.core.project import Project, TextLayer
-from cardforge.core.face import build_face, export_face
+from cardforge.core.face import build_face, export_face, export_logo
 from cardforge.core.fonts import bundled_fonts
 
 class EditorTests(unittest.TestCase):
@@ -69,3 +69,24 @@ class EditorTests(unittest.TestCase):
         diff = arr.astype(np.int32)[:, :, None, :] - pal
         expected = pal[np.argmin(np.sum(diff*diff, axis=3), axis=2)].astype(np.uint8)
         np.testing.assert_array_equal(np.array(nearest_palette_preview(Image.fromarray(arr), colors)), expected)
+
+    def test_standalone_logo_export_has_named_parts_and_stls(self):
+        with tempfile.TemporaryDirectory() as td:
+            logo = Path(td) / 'logo.png'
+            im = Image.new('RGBA', (160, 100), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(im)
+            draw.rectangle((12, 22, 68, 78), fill=(20, 20, 20, 255))
+            draw.ellipse((88, 22, 144, 78), fill=(220, 40, 30, 255))
+            im.save(logo)
+            p = Project()
+            p.logo.path = str(logo)
+            p.logo.width_mm = 22
+            out = export_logo(p, Path(td) / 'logo_out')
+            self.assertTrue((out / 'CardForge_Logo.3mf').exists())
+            self.assertTrue((out / 'CardForge_Logo.stl').exists())
+            self.assertTrue((out / 'Logo_Parts.json').exists())
+            stls = list((out / 'Logo_STLs').glob('*.stl'))
+            self.assertGreaterEqual(len(stls), 2)
+            self.assertTrue(all(__import__('trimesh').load(path, force='mesh').is_watertight for path in stls))
+            data = json.loads((out / 'Logo_Parts.json').read_text())
+            self.assertTrue(all(item['part'].startswith('Logo -') for item in data))

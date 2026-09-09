@@ -232,3 +232,53 @@ Photos are layout references. Only editable text and the extracted/replacement l
 Print the NFC base separately, install the tag and test-fit the face before gluing. No HueForge software is needed.
 ''',encoding='utf-8')
     return out
+
+
+def build_logo_parts(project):
+    """Build only the visible logo inlay parts for a standalone logo export.
+
+    The same rasterisation, palette quantisation, mirroring, and outline repair
+    used by the complete face are retained.  This keeps a logo-only STL aligned
+    with the face export while omitting the card background and backing sheet.
+    """
+    logo = project.logo
+    if not logo.enabled or not logo.path:
+        raise ValueError('Load or extract a logo before creating logo geometry.')
+    if not Path(logo.path).exists():
+        raise ValueError(f'Logo file was not found: {logo.path}')
+    parts = [part for part in build_face(project) if part['name'].startswith('Logo -')]
+    if not parts:
+        raise ValueError('No visible logo pixels were found. Increase the logo size or use a less transparent image.')
+    return parts
+
+
+def export_logo(project, output):
+    """Export standalone logo geometry as a named 3MF and aligned STLs."""
+    parts = build_logo_parts(project)
+    out = Path(output)
+    out.mkdir(parents=True, exist_ok=True)
+    export_3mf(parts, out / 'CardForge_Logo.3mf', project.hueforge.palette)
+    stls = out / 'Logo_STLs'
+    stls.mkdir(exist_ok=True)
+    info = []
+    import re
+    for i, part in enumerate(parts, 1):
+        name = f'{i:02d}_' + re.sub(r'[^A-Za-z0-9_-]+', '_', part['name']) + '.stl'
+        part['mesh'].export(stls / name)
+        info.append({'part': part['name'], 'suggested_color': part['color'], 'stl': name})
+    combined = trimesh.util.concatenate([part['mesh'] for part in parts])
+    combined.export(out / 'CardForge_Logo.stl')
+    (out / 'Logo_Parts.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
+    (out / 'LOGO_README.txt').write_text('''CARDFORGE STANDALONE LOGO
+
+CardForge_Logo.3mf contains the logo as named, separate color parts. Assign
+filaments under Objects / Parts in Bambu Studio. Logo_STLs contains the same
+parts aligned to one origin; load all files together as one multipart object.
+CardForge_Logo.stl is a combined single-color copy for quick inspection.
+
+The logo is mirrored for artwork-side-down printing and occupies the selected
+front inlay depth. It has a flat top and bottom so it can be placed on the
+CardForge face or used as a separate insert. Inspect the slicer preview before
+printing small details.
+''', encoding='utf-8')
+    return out

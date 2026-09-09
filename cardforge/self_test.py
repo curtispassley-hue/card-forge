@@ -77,6 +77,15 @@ def run():
         assert (target/'CardForge_Face.3mf').exists()
         assert (target/'Parts.json').exists()
         assert (target/'Aligned_STLs').is_dir()
+        with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
+             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
+            app.export_logo_stl()
+            deadline = time.monotonic() + 30
+            while app.busy and time.monotonic() < deadline:
+                app.update()
+                time.sleep(0.01)
+            assert not app.busy and (target/'CardForge_Logo.3mf').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
+        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
