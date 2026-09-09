@@ -846,7 +846,7 @@ class CardForgeApp(tk.Tk):
         self.project.logo.y_mm = float(self.logo_y.get())
         self.project.logo.width_mm = max(0.5, float(self.logo_w.get()))
         if hasattr(self, 'logo_opacity'):
-            self.project.logo.opacity = int(max(0, min(100, float(self.logo_opacity.get()))) * 2.55)
+            self.project.logo.opacity = int(round(max(0, min(100, float(self.logo_opacity.get()))) * 2.55))
         if hasattr(self, 'logo_enabled_var'):
             self.project.logo.enabled = bool(self.logo_enabled_var.get())
         self.refresh_logo_preview()
