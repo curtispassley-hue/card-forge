@@ -73,7 +73,7 @@ def run():
                 app.update()
                 ticks += 1
                 time.sleep(0.01)
-            assert not app.busy and ticks > 1 and notices, (ticks, notices)
+            assert not app.busy and ticks > 1 and notices, (ticks, notices, errors)
         assert (target/'CardForge_Face.3mf').exists()
         assert (target/'Parts.json').exists()
         assert (target/'Aligned_STLs').is_dir()
