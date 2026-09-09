@@ -1,0 +1,28 @@
+CardForge 4D 0.4 Alpha
+
+New:
+- Offline RapidOCR + ONNX Runtime integration architecture.
+- OCR results become editable text layers with confidence metadata.
+- Automatic inpainting of recognized photographed text so editable text does not simply duplicate the source.
+- Manual drag-box logo extraction with estimated transparent background.
+- Automatic clean-plate removal of the photographed logo after extraction.
+- Portable .cardforge project bundle containing source/corrected/cleaned images and logo assets.
+- OCR confidence checks in the printability report.
+- OCR confidence shown beside recognized text layers.
+- PyInstaller collection of RapidOCR model files and ONNX Runtime binaries.
+- Disabled UPX for the release EXE to reduce native-runtime packaging problems.
+
+Retained:
+- Perspective correction and manual corners.
+- HueForge/FlatForge full-color handoff.
+- 4-filament palette metadata.
+- HueForge 3MF/STL import with XY-only normalization and preserved Z.
+- Thin face + structural NFC base architecture.
+- Watertight base generation.
+- Windows/GitHub build pipelines.
+
+Smoke test result in the development environment:
+CARDFORGE 0.4 SMOKE TEST PASSED
+
+Important:
+The Linux development environment cannot install the new RapidOCR package because it has no outbound package-network access. OCR integration is lazy-loaded, and the non-OCR core plus OCR helper functions are smoke-tested here. The Windows build script installs RapidOCR/ONNX Runtime and bundles their models; that Windows build still needs to be executed and tested on Windows CI/hardware.

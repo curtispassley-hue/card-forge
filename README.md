@@ -125,4 +125,3 @@ This is the preferred reproducible Windows release route once the project is in 
 ## Next target
 
 The next development target is 0.5: OCR review/acceptance UI, font matching assistance, better logo/background segmentation, per-object hiding/locking, filament-library presets, and a Windows CI-produced executable for hands-on testing.
-
