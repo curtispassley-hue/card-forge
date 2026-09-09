@@ -14,7 +14,7 @@ from .fonts import default_font
 import trimesh
 
 
-def prism(poly, z0, z1):
+def prism(poly, z0, z1, _retry=False):
     """Constrained caps preserve concave outlines and letter counters exactly."""
     meshes = []
     for geom in getattr(poly, 'geoms', [poly]):
@@ -38,6 +38,31 @@ def prism(poly, z0, z1):
         mesh = trimesh.Trimesh(verts, faces, process=True)
         mesh.fix_normals()
         if not mesh.is_watertight or not mesh.is_winding_consistent:
+            # Raster logos can leave a one-pixel zig-zag around a counter or
+            # a retraced collinear edge.  Shapely keeps that outline valid,
+            # but the triangulated cap can then contain one four-way edge.
+            # Remove only that sub-pixel noise and retry; this keeps the
+            # intended letter/logo silhouette while producing a closed STL.
+            if not _retry:
+                # Most cases are fixed by the first tolerance; the larger
+                # fallbacks handle a heavily antialiased logo without making
+                # the normal text path coarser.
+                for tolerance in (0.05, 0.08, 0.12):
+                    cleaned = geom.simplify(tolerance, preserve_topology=True)
+                    if not isinstance(cleaned, Polygon) or cleaned.is_empty or cleaned.area <= 1e-9:
+                        continue
+                    if cleaned.equals_exact(geom, 1e-9):
+                        continue
+                    try:
+                        retry = prism(cleaned, z0, z1, _retry=True)
+                    except ValueError:
+                        continue
+                    if retry is not None and retry.is_watertight and retry.is_winding_consistent:
+                        meshes.append(retry)
+                        break
+                else:
+                    raise ValueError('A face outline could not form a closed solid. Try a simpler logo or larger text.')
+                continue
             raise ValueError('A face outline could not form a closed solid. Try a simpler logo or larger text.')
         meshes.append(mesh)
     return trimesh.util.concatenate(meshes) if meshes else None
@@ -132,7 +157,10 @@ def build_face(project):
     parts.append({'name':'Solid backing','color':settings.background_color,
                   'mesh':prism(footprint,depth,total),'polygon':footprint,'z0':depth,'z1':total})
     expected=footprint.area*total
-    if not np.isclose(sum(x['mesh'].volume for x in parts),expected,rtol=1e-6):
+    # A raster edge can be simplified by a few hundredths of a millimeter
+    # when repairing a retraced pixel boundary.  Keep the check strict enough
+    # to catch missing regions while allowing that bounded repair tolerance.
+    if not np.isclose(sum(x['mesh'].volume for x in parts), expected, rtol=2e-5, atol=0.05):
         raise ValueError('Face solids failed the volume check.')
     return parts
 

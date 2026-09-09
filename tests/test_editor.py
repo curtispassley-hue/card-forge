@@ -42,6 +42,18 @@ class EditorTests(unittest.TestCase):
                 self.assertTrue(extruders)
                 self.assertTrue(all(1 <= x <= 4 for x in extruders))
 
+    def test_raster_logo_repairs_small_counter_edges(self):
+        with tempfile.TemporaryDirectory() as td:
+            logo = Path(td) / 'logo.png'
+            im = Image.new('RGB', (1000, 220), 'white')
+            ImageDraw.Draw(im).text((40, 70), 'CARDFORGE TEST 123', fill='black')
+            im.save(logo)
+            p = Project()
+            p.logo.path = str(logo)
+            p.logo.width_mm = 19.8
+            parts = build_face(p)
+            self.assertTrue(all(x['mesh'].is_watertight for x in parts))
+
     def test_remove_background_keeps_logo_and_alpha(self):
         im = Image.new('RGBA', (80, 80), 'white')
         ImageDraw.Draw(im).rectangle((20, 20, 60, 60), fill=(255, 0, 0, 128))
