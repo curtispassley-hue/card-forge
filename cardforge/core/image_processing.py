@@ -126,10 +126,12 @@ def nearest_palette_preview(image: Image.Image, palette_hex: list[str]) -> Image
     """Preview only: map pixels to nearest of the user's four physical filament colors."""
     rgb = np.asarray(image.convert("RGB"), dtype=np.int32)
     pal = np.array([hex_to_rgb(c) for c in palette_hex], dtype=np.int32)
-    diff = rgb[:, :, None, :] - pal[None, None, :, :]
-    dist = np.sum(diff * diff, axis=3)
-    idx = np.argmin(dist, axis=2)
-    out = pal[idx].astype(np.uint8)
+    out = np.empty(rgb.shape, dtype=np.uint8)
+    for start in range(0, rgb.shape[0], 64):
+        rows = rgb[start:start+64]
+        diff = rows[:, :, None, :] - pal[None, None, :, :]
+        idx = np.argmin(np.sum(diff * diff, axis=3), axis=2)
+        out[start:start+64] = pal[idx].astype(np.uint8)
     return Image.fromarray(out, "RGB")
 
 

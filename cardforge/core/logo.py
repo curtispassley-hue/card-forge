@@ -7,6 +7,22 @@ from PIL import Image
 from .ocr import inpaint_regions
 
 
+def remove_logo_background(image: Image.Image, tolerance: float = 34) -> Image.Image:
+    """Remove similar border-connected background; preserve existing transparency."""
+    if not np.isfinite(tolerance) or not 0 <= tolerance <= 255:
+        raise ValueError('Background tolerance must be between 0 and 255.')
+    rgba = np.array(image.convert('RGBA'))
+    rgb = rgba[:, :, :3].astype(np.float32)
+    border = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+    bg = np.median(border, axis=0)
+    similar = (np.linalg.norm(rgb - bg, axis=2) <= tolerance).astype(np.uint8)
+    _, labels = cv2.connectedComponents(similar, connectivity=4)
+    edges = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    edges = edges[edges != 0]
+    rgba[np.isin(labels, edges), 3] = 0
+    return Image.fromarray(rgba)
+
+
 def normalize_rect(rect_px, image_size):
     (x0, y0), (x1, y1) = rect_px
     w, h = image_size

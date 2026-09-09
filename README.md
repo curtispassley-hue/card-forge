@@ -1,8 +1,19 @@
-# CardForge 4D 0.4.1 Alpha
+# CardForge 4D 0.5 Alpha
 
-Download the tested Windows executable from [Releases](https://github.com/curtispassley-hue/card-forge/releases). Each published alpha passes a packaged runtime self-test before upload. No Python installation is needed to run the EXE.
+Download **CardForge4D-Windows.zip** from [Releases](https://github.com/curtispassley-hue/card-forge/releases). Choose **Extract All**, then open `CardForge4D/CardForge4D.exe`. Keep the `_internal` folder beside the EXE. Python is not required. Do not run inside the ZIP or copy the EXE alone.
 
-This repository starts from the supplied `CardForge4D_v0_4_alpha.zip`. See [0.4.1 fixes and limitations](RELEASE_NOTES_0_4_1.md). The corrected default base is 2.6 mm thick, with a 0.7 mm floor below the NFC pocket. Old projects with thinner bases may need adjustment.
+This replaces the earlier self-extracting single EXE, which was reported as a virus on the user's PC. No antivirus settings are changed. A Defender scan report is published with each build; an unavailable scan is explicitly recorded. The app is unsigned and a clean runner scan does not guarantee every PC will accept it. If Windows blocks it, leave protection enabled and submit it to Microsoft for review: https://www.microsoft.com/en-us/wdsi/filesubmission
+
+## Changes in 0.5
+
+- HueForge export works in the background with activity feedback and visible errors.
+- Palette preview uses bounded chunks to reduce peak memory.
+- Logo width and Smaller/Larger controls preserve aspect ratio.
+- Remove Logo Background handles plain border-connected backgrounds and preserves transparency; tolerance is adjustable.
+- Undo / Redo buttons and Ctrl+Z / Ctrl+Y restore edits. Artwork revisions are preserved so background removal can be undone.
+- Next / Back buttons, clearer tabs, cleaner spacing and scrollable editing panels.
+
+The workflow tests the actual folder application, including export responsiveness, logo controls, undo/redo and step navigation.
 
 CardForge 4D converts a photographed business card into a two-piece 3D-printable NFC card workflow designed around a Bambu Lab A1 / AMS Lite and HueForge / FlatForge.
 

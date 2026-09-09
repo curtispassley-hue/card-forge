@@ -1,5 +1,11 @@
 from __future__ import annotations
 import json
+import copy
+import queue
+import threading
+import uuid
+from dataclasses import asdict
+from functools import wraps
 import math
 import shutil
 import tempfile
@@ -10,7 +16,7 @@ from PIL import Image, ImageTk, ImageDraw
 
 from .core.project import Project, TextLayer
 from .core.ocr import backend_status, ocr_candidates, remove_ocr_text, candidates_to_text_layers, OCRCandidate
-from .core.logo import extract_logo, remove_logo_region, suggest_logo_regions
+from .core.logo import extract_logo, remove_logo_region, suggest_logo_regions, remove_logo_background
 from .core.image_processing import (
     auto_correct_file,
     manual_correct_file,
@@ -22,7 +28,7 @@ from .core.geometry import export_base_stl, make_face_blank, face_target_dimensi
 from .core.hueforge import export_hueforge_package, import_hueforge_path
 
 
-VERSION = "0.4.1 Alpha"
+VERSION = "0.5 Alpha"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
@@ -53,12 +59,144 @@ class CardForgeApp(tk.Tk):
         self.logo_select_rect = None
         self.preview_photos = {}
 
+        self.undo_stack = []
+        self.redo_stack = []
+        self._action_depth = 0
+        self.busy = False
+        self._style()
         self._build_menu()
         self._build_ui()
         self.sync_ui_from_project()
+        self.bind('<Control-z>', lambda e: self.undo())
+        self.bind('<Control-y>', lambda e: self.redo())
+        self.tabs.bind('<<NotebookTabChanged>>', self._step_changed)
+        self._step_changed()
 
     def report_callback_exception(self, exc, value, tb):
         messagebox.showerror("CardForge", str(value))
+
+    def _style(self):
+        self.configure(bg='#f3f5f8')
+        style = ttk.Style(self)
+        style.theme_use('clam')
+        style.configure('.', font=('Segoe UI', 10), background='#f3f5f8', foreground='#243247')
+        style.configure('TButton', padding=(10, 7))
+        style.configure('Accent.TButton', background='#245edb', foreground='white')
+        style.map('Accent.TButton', background=[('active', '#1b4bb1')])
+        style.configure('Title.TLabel', font=('Segoe UI', 21, 'bold'))
+        style.configure('Muted.TLabel', foreground='#64748b')
+        style.configure('TNotebook.Tab', padding=(16, 10))
+        style.configure('TLabelframe', padding=8)
+
+    def _scroll_panel(self, parent):
+        shell = ttk.Frame(parent, width=310)
+        shell.pack(side='left', fill='y', padx=(0, 12))
+        canvas = tk.Canvas(shell, width=300, highlightthickness=0, bg='#f3f5f8')
+        bar = ttk.Scrollbar(shell, orient='vertical', command=canvas.yview)
+        bar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        canvas.configure(yscrollcommand=bar.set)
+        inner = ttk.Frame(canvas, padding=(0, 0, 10, 8))
+        item = canvas.create_window(0, 0, window=inner, anchor='nw')
+        inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda e: canvas.itemconfigure(item, width=e.width))
+        # The existing callers pack the panel; the canvas owns this inner frame.
+        inner.pack = lambda *a, **k: None
+        return inner
+
+    def _step_changed(self, event=None):
+        if not hasattr(self, 'step_label'):
+            return
+        i = self.tabs.index(self.tabs.select())
+        self.step_label.configure(text=f'Step {i+1} of 5')
+        self.back_button.configure(state='disabled' if i == 0 else 'normal')
+        self.next_button.configure(state='disabled' if i == 4 else 'normal')
+        if i == 1:
+            self.after_idle(self.refresh_design_preview)
+        elif i == 3:
+            self.after_idle(self.draw_3d_preview)
+        elif i == 4:
+            self.run_checks()
+
+    def navigate(self, delta):
+        self.apply_logo()
+        self.sync_hueforge_fields()
+        self.apply_geometry()
+        self.tabs.select(max(0, min(4, self.tabs.index(self.tabs.select()) + delta)))
+
+    def _snapshot(self):
+        return (copy.deepcopy(self.project), list(self.flatforge_meshes))
+
+    def _remember(self):
+        self.undo_stack.append(self._snapshot())
+        self.undo_stack = self.undo_stack[-40:]
+        self.redo_stack.clear()
+
+    def _restore(self, snapshot):
+        self.project, self.flatforge_meshes = snapshot
+        self.manual_mode = self.logo_select_mode = self.dragging = False
+        self.manual_points = []
+        self.sync_ui_from_project()
+        for canvas in (self.source_canvas, self.design_canvas, self.hf_preview_canvas):
+            canvas.delete('all')
+        self.show_source_original()
+        self.refresh_design_preview()
+        self.status.set('Edit restored.')
+
+    def undo(self):
+        if self.busy or not self.undo_stack:
+            return
+        self.redo_stack.append(self._snapshot())
+        self._restore(self.undo_stack.pop())
+
+    def redo(self):
+        if self.busy or not self.redo_stack:
+            return
+        self.undo_stack.append(self._snapshot())
+        self._restore(self.redo_stack.pop())
+
+    def scale_logo(self, factor):
+        self.logo_w.set(max(0.5, min(self.project.geometry.card_width_mm, self.project.logo.width_mm * factor)))
+        self.apply_logo()
+
+    def clean_logo_background(self):
+        if not self.project.logo.path:
+            messagebox.showinfo('CardForge', 'Load or extract a logo first.')
+            return
+        out = self.tempdir / (uuid.uuid4().hex + '_transparent_logo.png')
+        with Image.open(self.project.logo.path) as im:
+            remove_logo_background(im, float(self.bg_tolerance.get())).save(out)
+        self.project.logo.path = str(out)
+        self.refresh_design_preview()
+        self.status.set('Logo background removed. Undo restores the original.')
+
+    def _background(self, label, work, done):
+        if self.busy:
+            return
+        self.busy = True
+        self.status.set(label)
+        self.progress.start(12)
+        results = queue.Queue()
+        def worker():
+            try:
+                results.put((True, work()))
+            except Exception as exc:
+                results.put((False, str(exc)))
+        def poll():
+            try:
+                ok, result = results.get_nowait()
+            except queue.Empty:
+                self.after(60, poll)
+                return
+            self.busy = False
+            self.progress.stop()
+            self.status.set('Export complete.' if ok else 'Export failed; see the error message.')
+            if ok:
+                done(result)
+            else:
+                messagebox.showerror('CardForge export', result)
+        threading.Thread(target=worker, daemon=True).start()
+        self.after(60, poll)
 
     # ---------- UI BUILD ----------
     def _build_menu(self):
@@ -73,6 +211,14 @@ class CardForgeApp(tk.Tk):
         self.config(menu=menu)
 
     def _build_ui(self):
+        header = ttk.Frame(self, padding=(18, 12))
+        header.pack(fill='x')
+        ttk.Label(header, text='CardForge 4D', style='Title.TLabel').pack(side='left')
+        ttk.Label(header, text='PHOTO  /  DESIGN  /  PRINT', style='Muted.TLabel').pack(side='left', padx=20)
+        self.undo_button = ttk.Button(header, text='Undo', command=self.undo)
+        self.undo_button.pack(side='right', padx=4)
+        self.redo_button = ttk.Button(header, text='Redo', command=self.redo)
+        self.redo_button.pack(side='right', padx=4)
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -94,7 +240,17 @@ class CardForgeApp(tk.Tk):
         self._assembly_ui()
         self._check_ui()
 
-        ttk.Label(self, textvariable=self.status, anchor="w").pack(fill="x", padx=10, pady=(0, 8))
+        nav = ttk.Frame(self, padding=(18, 8))
+        nav.pack(fill='x')
+        self.back_button = ttk.Button(nav, text='Back', command=lambda: self.navigate(-1))
+        self.back_button.pack(side='left')
+        self.step_label = ttk.Label(nav, style='Muted.TLabel')
+        self.step_label.pack(side='left', padx=16)
+        self.next_button = ttk.Button(nav, text='Next', style='Accent.TButton', command=lambda: self.navigate(1))
+        self.next_button.pack(side='right')
+        self.progress = ttk.Progressbar(self, mode='indeterminate')
+        self.progress.pack(fill='x', padx=18)
+        ttk.Label(self, textvariable=self.status, anchor='w', padding=(18, 8)).pack(fill='x')
 
     def _source_ui(self):
         controls = ttk.Frame(self.source_tab)
@@ -122,13 +278,13 @@ class CardForgeApp(tk.Tk):
         self.source_canvas.bind("<Button-1>", self.source_canvas_click)
 
     def _design_ui(self):
-        left = ttk.Frame(self.design_tab)
+        left = self._scroll_panel(self.design_tab)
         left.pack(side="left", fill="y", padx=(0, 10))
         right = ttk.Frame(self.design_tab)
         right.pack(side="right", fill="both", expand=True)
 
         ttk.Label(left, text="Editable layers", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        self.text_list = tk.Listbox(left, width=34, height=11)
+        self.text_list = tk.Listbox(left, width=34, height=6)
         self.text_list.pack(fill="x", pady=(10, 4))
         ttk.Button(left, text="Add Text Layer", command=self.add_text).pack(fill="x", pady=2)
         ttk.Button(left, text="Edit Selected Text", command=self.edit_selected_text).pack(fill="x", pady=2)
@@ -148,7 +304,15 @@ class CardForgeApp(tk.Tk):
         self.logo_w = tk.DoubleVar()
         for label, var in [("Logo X mm", self.logo_x), ("Logo Y mm", self.logo_y), ("Logo width mm", self.logo_w)]:
             self._field(left, label, var)
-        ttk.Button(left, text="Apply Logo Position", command=self.apply_logo).pack(fill="x", pady=6)
+        ttk.Button(left, text="Apply Logo Position / Size", command=self.apply_logo).pack(fill="x", pady=4)
+        scale_row = ttk.Frame(left)
+        scale_row.pack(fill='x')
+        ttk.Button(scale_row, text='Smaller −', command=lambda: self.scale_logo(0.9)).pack(side='left', expand=True, fill='x')
+        ttk.Button(scale_row, text='Larger +', command=lambda: self.scale_logo(1.1)).pack(side='left', expand=True, fill='x')
+        self.bg_tolerance = tk.DoubleVar(value=34)
+        self._field(left, 'Background tolerance', self.bg_tolerance)
+        ttk.Button(left, text='Remove Logo Background', command=self.clean_logo_background).pack(fill='x', pady=4)
+        ttk.Label(left, text='Best for a plain background. Undo restores the original.', wraplength=260, style='Muted.TLabel').pack(anchor='w')
 
         ttk.Separator(left).pack(fill="x", pady=10)
         self.snap_var = tk.DoubleVar(value=0.25)
@@ -216,7 +380,7 @@ class CardForgeApp(tk.Tk):
         self._set_hf_info("No HueForge / FlatForge geometry imported yet.")
 
     def _assembly_ui(self):
-        left = ttk.Frame(self.assembly_tab)
+        left = self._scroll_panel(self.assembly_tab)
         left.pack(side="left", fill="y", padx=(0, 12))
         right = ttk.Frame(self.assembly_tab)
         right.pack(side="right", fill="both", expand=True)
@@ -313,7 +477,7 @@ class CardForgeApp(tk.Tk):
         if not self.project.source_image:
             messagebox.showinfo("CardForge", "Load a photo first.")
             return
-        out = self.tempdir / "corrected_card.png"
+        out = self.tempdir / (uuid.uuid4().hex + "_corrected_card.png")
         detected = auto_correct_file(self.project.source_image, out)
         self.project.corrected_image = str(out)
         self.project.cleaned_image = ""
@@ -388,7 +552,7 @@ class CardForgeApp(tk.Tk):
         if len(self.manual_points) != 4 or not self.project.source_image:
             messagebox.showinfo("CardForge", "Select exactly four card corners first.")
             return
-        out = self.tempdir / "manual_corrected_card.png"
+        out = self.tempdir / (uuid.uuid4().hex + "_manual_corrected_card.png")
         manual_correct_file(self.project.source_image, out, self.manual_points)
         self.project.corrected_image = str(out)
         self.project.cleaned_image = ""
@@ -555,6 +719,7 @@ class CardForgeApp(tk.Tk):
                 ttk.Button(row, text="Pick", command=lambda: self.pick_text_color(vars_["color"])).pack(side="right", padx=(4, 0))
 
         def save():
+            self._remember()
             new = TextLayer(
                 vars_["text"].get(), float(vars_["x"].get()), float(vars_["y"].get()),
                 int(vars_["size"].get()), vars_["font"].get(), vars_["color"].get()
@@ -622,6 +787,7 @@ class CardForgeApp(tk.Tk):
             if abs(x-self.project.logo.x_mm) <= self.project.logo.width_mm/2 and abs(y-self.project.logo.y_mm) <= h_mm/2:
                 candidates.append((math.hypot(x-self.project.logo.x_mm, y-self.project.logo.y_mm), ("logo", 0)))
         if candidates:
+            self._remember()
             candidates.sort(key=lambda z: z[0])
             self.drag_target = candidates[0][1]
             self.dragging = True
@@ -701,7 +867,7 @@ class CardForgeApp(tk.Tk):
 
             if self.project.editor.ocr_remove_original and found:
                 cleaned = remove_ocr_text(im, found)
-                out = self.tempdir / "ocr_cleaned_card.png"
+                out = self.tempdir / (uuid.uuid4().hex + "_ocr_cleaned_card.png")
                 cleaned.save(out)
                 self.project.cleaned_image = str(out)
 
@@ -770,7 +936,7 @@ class CardForgeApp(tk.Tk):
             self.status.set("Logo selection was too small.")
             return
         try:
-            out = self.tempdir / "extracted_logo.png"
+            out = self.tempdir / (uuid.uuid4().hex + "_extracted_logo.png")
             extract_logo(im, (start, end), out)
             self.project.logo.path = str(out)
             self.project.logo.source_rect_px = [[float(x0), float(y0)], [float(x1), float(y1)]]
@@ -783,7 +949,7 @@ class CardForgeApp(tk.Tk):
             # Remove the photographed logo from the background so the extracted
             # logo becomes a genuinely editable layer rather than a duplicate.
             cleaned = remove_logo_region(im, (start, end))
-            clean_path = self.tempdir / "logo_cleaned_card.png"
+            clean_path = self.tempdir / (uuid.uuid4().hex + "_logo_cleaned_card.png")
             cleaned.save(clean_path)
             self.project.cleaned_image = str(clean_path)
 
@@ -833,17 +999,26 @@ class CardForgeApp(tk.Tk):
         canvas.create_image(half+20, 30, anchor="nw", image=p2)
 
     def export_hueforge(self):
-        im = self.composite_image()
-        if im is None:
-            messagebox.showinfo("CardForge", "Load a card photo first.")
+        if self.busy:
             return
         self.sync_hueforge_fields()
         self.apply_geometry()
-        out = filedialog.askdirectory(title="Choose HueForge handoff folder")
-        if out:
-            export_hueforge_package(im, self.project, out)
-            self.status.set("HueForge handoff package created.")
-            messagebox.showinfo("CardForge", f"HueForge handoff package created in:\n{out}")
+        if not self.project.source_image and not self.project.corrected_image:
+            messagebox.showinfo('CardForge', 'Load a card photo first.')
+            return
+        out = filedialog.askdirectory(title='Choose HueForge handoff folder')
+        if not out:
+            return
+        snapshot = copy.deepcopy(self.project)
+        def work():
+            source = snapshot.cleaned_image or snapshot.corrected_image or snapshot.source_image
+            with Image.open(source) as raw:
+                im = fit_card_image(raw, ratio=snapshot.geometry.card_width_mm / snapshot.geometry.card_height_mm)
+            im = compose_editable_layers(im, snapshot.geometry.card_width_mm,
+                                         snapshot.geometry.card_height_mm, snapshot.texts, snapshot.logo)
+            return export_hueforge_package(im, snapshot, out)
+        self._background('Exporting HueForge files…', work,
+                         lambda result: messagebox.showinfo('CardForge', f'HueForge handoff ready in:\n{result}'))
 
     def import_flatforge_folder(self):
         folder = filedialog.askdirectory(title="Select FlatForge STL folder")
@@ -1212,6 +1387,30 @@ class CardForgeApp(tk.Tk):
             self.status.set(f"Opened {Path(p).name}")
         except Exception as e:
             messagebox.showerror("CardForge", f"Could not open project:\n{e}")
+
+
+def _undoable(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        outer = self._action_depth == 0
+        before = self._snapshot() if outer else None
+        self._action_depth += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._action_depth -= 1
+            if outer and asdict(before[0]) != asdict(self.project):
+                self.undo_stack.append(before)
+                self.undo_stack = self.undo_stack[-40:]
+                self.redo_stack.clear()
+    return call
+
+for _name in ('load_photo', 'auto_correct', 'use_original', 'apply_manual_corners',
+              'delete_text', 'load_logo', 'apply_logo', 'clean_logo_background',
+              'scale_logo', 'run_ocr', 'restore_photo_background', 'finish_logo_selection',
+              'pick_filament_color', 'apply_geometry', 'sync_hueforge_fields',
+              'new_project', 'open_project', '_import_hueforge_path'):
+    setattr(CardForgeApp, _name, _undoable(getattr(CardForgeApp, _name)))
 
 
 def main():

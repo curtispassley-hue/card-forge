@@ -34,6 +34,47 @@ def run():
         app.report_callback_exception = lambda *args: errors.append(str(args))
         app.update()
         app.run_checks()
+        # Exercise real editor controls and keep the event loop alive during export.
+        from unittest.mock import patch
+        import time
+        art = td/'source.png'
+        im.save(art)
+        logo = td/'logo.png'
+        im.save(logo)
+        app.project.source_image = str(art)
+        app.project.logo.path = str(logo)
+        width = app.project.logo.width_mm
+        app.scale_logo(1.1)
+        assert app.project.logo.width_mm > width
+        app.undo()
+        assert app.project.logo.width_mm == width
+        app.redo()
+        assert app.project.logo.width_mm > width
+        app.clean_logo_background()
+        cleaned = app.project.logo.path
+        assert cleaned != str(logo)
+        app.undo()
+        assert app.project.logo.path == str(logo)
+        app.navigate(1)
+        assert app.tabs.index(app.tabs.select()) == 1
+        app.navigate(-1)
+        assert app.tabs.index(app.tabs.select()) == 0
+        target = td/'handoff'
+        notices = []
+        with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
+             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
+            app.export_hueforge()
+            assert app.busy
+            ticks = 0
+            deadline = time.monotonic() + 30
+            while app.busy and time.monotonic() < deadline:
+                app.update()
+                ticks += 1
+                time.sleep(0.01)
+            assert not app.busy and ticks > 1 and notices, (ticks, notices)
+        assert (target/'CardForge_HueForge_Source.png').exists()
+        assert (target/'CardForge_4Filament_Preview.png').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, '3mf_import': True}
+        return {'passed': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, '3mf_import': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_hueforge_export': True}

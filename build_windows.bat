@@ -46,21 +46,21 @@ python main.py --self-test source-test.json
 if errorlevel 1 goto :fail
 
 echo.
-echo Building one-file EXE...
+echo Building folder application...
 pyinstaller --noconfirm --clean CardForge4D.spec
 if errorlevel 1 goto :fail
-start /wait "" dist\CardForge4D.exe --self-test exe-test.json
+start /wait "" dist\CardForge4D\CardForge4D.exe --self-test exe-test.json
 if errorlevel 1 goto :fail
 
-if exist dist\CardForge4D.exe (
+if exist dist\CardForge4D\CardForge4D.exe (
   echo.
   echo ==============================================
   echo SUCCESS
   echo Standalone executable:
-  echo %CD%\dist\CardForge4D.exe
+  echo %CD%\dist\CardForge4D\CardForge4D.exe
   echo ==============================================
   echo.
-  echo The finished EXE can be copied to another Windows 10/11 PC.
+  echo Copy the ENTIRE dist\CardForge4D folder to another Windows PC.
   echo It does not request administrator privileges.
   pause
   exit /b 0

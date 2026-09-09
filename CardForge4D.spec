@@ -26,9 +26,10 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 exe = EXE(
-    pyz, a.scripts, a.binaries, a.datas,
+    pyz, a.scripts,
     [],
     name="CardForge4D",
+    exclude_binaries=True,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -42,3 +43,4 @@ exe = EXE(
     uac_admin=False,
     uac_uiaccess=False,
 )
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="CardForge4D")

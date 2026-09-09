@@ -1,4 +1,4 @@
-name: Build CardForge4D 0.4 Windows EXE
+name: Build CardForge4D 0.5 Windows App
 
 on:
   workflow_dispatch:
@@ -40,11 +40,25 @@ jobs:
       - name: Build EXE
         run: pyinstaller --noconfirm --clean CardForge4D.spec
 
+      - name: Scan extracted app with Microsoft Defender
+        shell: pwsh
+        run: |
+          $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+          if ($status -and $status.AMServiceEnabled) {
+            $scanner = Join-Path $env:ProgramFiles 'Windows Defender/MpCmdRun.exe'
+            & $scanner -Scan -ScanType 3 -File "$PWD/dist/CardForge4D" -DisableRemediation
+            $code = $LASTEXITCODE
+            @{available=$true; exit_code=$code; definitions=$status.AntivirusSignatureVersion} | ConvertTo-Json | Set-Content defender-scan.json
+            if ($code -ne 0) { throw "Defender did not report a clean scan: $code" }
+          } else {
+            @{available=$false; reason='Defender service is unavailable on this runner; scan not performed'} | ConvertTo-Json | Set-Content defender-scan.json
+          }
+
       - name: Test packaged EXE offline
         shell: pwsh
         run: |
           $report = Join-Path $PWD 'exe-test.json'
-          $app = Start-Process dist\CardForge4D.exe -ArgumentList '--self-test', $report -PassThru -WindowStyle Hidden
+          $app = Start-Process dist\CardForge4D\CardForge4D.exe -ArgumentList '--self-test', $report -PassThru -WindowStyle Hidden
           if (-not $app.WaitForExit(180000)) { $app.Kill(); throw 'EXE self-test timed out' }
           if ($app.ExitCode -ne 0) { Get-Content $report; throw 'EXE self-test failed' }
           $result = Get-Content $report -Raw | ConvertFrom-Json
@@ -55,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item dist\CardForge4D.exe release\CardForge4D.exe
+          Copy-Item dist\CardForge4D release\CardForge4D -Recurse
           Copy-Item README.md release\README.md
           Copy-Item LICENSE.txt release\LICENSE.txt
           Compress-Archive -Path release\* -DestinationPath CardForge4D-Windows.zip -Force
@@ -66,13 +80,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $tag = 'v0.4.1-alpha.${{ github.run_number }}'
+          $tag = 'v0.5.0-alpha.${{ github.run_number }}'
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.4.1 Alpha' --notes-file RELEASE_NOTES_0_4_1.md
+            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.5 Alpha' --notes-file RELEASE_NOTES_0_5.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
-          gh release upload $tag dist/CardForge4D.exe CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json --clobber
+          gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json defender-scan.json --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
 
       - name: Upload EXE artifact
@@ -80,9 +94,9 @@ jobs:
         with:
           name: CardForge4D-Windows
           path: |
-            dist/CardForge4D.exe
             CardForge4D-Windows.zip
             CardForge4D-Source.zip
+            defender-scan.json
             exe-test.json
             source-test.json
 
