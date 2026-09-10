@@ -161,16 +161,24 @@ def artwork_masks(project, include_text=True):
         ImageDraw.Draw(mask).text(((layer.x_mm-inset)*sx, (fh-layer.y_mm+inset)*sy),
                                  layer.text,font=font,fill=255,anchor='mm')
         masks.append((f'Text {i+1} - {layer.text[:32]}', palette_color(layer.color, project.hueforge.palette), np.array(mask)>=128))
-    logo = project.logo
-    if logo.enabled and logo.path:
+    # The original logo field is kept for old projects; each additional
+    # element is cut with the same clipping and palette rules.
+    for element_index, logo in enumerate([project.logo, *getattr(project, 'elements', [])]):
+        if not logo or not logo.enabled or not logo.path:
+            continue
+        if not Path(logo.path).exists():
+            raise ValueError(f'Image element was not found: {logo.path}')
         if not np.isfinite([logo.x_mm, logo.y_mm, logo.width_mm, logo.opacity]).all() or not 0.5 <= logo.width_mm <= 256:
-            raise ValueError('Logo width must be 0.5–256 mm and its position must be a valid number.')
+            raise ValueError('Image width must be 0.5–256 mm and its position must be a valid number.')
         with Image.open(logo.path) as raw:
             im=raw.convert('RGBA')
+        if project.editor.grayscale_artwork:
+            gray = im.convert('L')
+            im = Image.merge('RGBA', (gray, gray, gray, im.getchannel('A')))
         width=max(1,round(logo.width_mm*sx))
         height=max(1,round(im.height*width/im.width))
         if width*height > 20_000_000:
-            raise ValueError('Logo size is too large.')
+            raise ValueError('Image element is too large.')
         im=im.resize((width,height),Image.Resampling.LANCZOS)
         canvas=Image.new('RGBA',(w,h))
         canvas.alpha_composite(im,(round((logo.x_mm-inset)*sx-width/2),round((fh-logo.y_mm+inset)*sy-height/2)))
@@ -181,8 +189,9 @@ def artwork_masks(project, include_text=True):
         for start in range(0,h,64):
             diff=pixels[start:start+64,:,:3].astype(np.int32)[:,:,None,:]-pal
             indices[start:start+64]=np.argmin((diff*diff).sum(axis=3),axis=2)
+        prefix = 'Logo' if element_index == 0 else (logo.name or f'Element {element_index}')
         for i,color in enumerate(project.hueforge.palette):
-            masks.append((f'Logo - color {i+1}',color,alpha & (indices==i)))
+            masks.append((f'{prefix} - color {i+1}',color,alpha & (indices==i)))
     return masks, footprint, (w, h), depth, total
 
 
@@ -265,10 +274,12 @@ def export_3mf(parts, path, palette=None, assembly_name='CardForge flush face'):
         z.writestr('Metadata/model_settings.config',ET.tostring(config,encoding='utf-8',xml_declaration=True))
 
 
-def export_face(project, output, include_base=False):
+def export_face(project, output, include_base=False, output_name=None):
     parts=build_face(project)
-    out=_export_folder(output, 'CardForge_Face')
-    export_3mf(parts,out/'CardForge_Face.3mf', project.hueforge.palette)
+    out=_export_folder(output, 'CardForge_Face', output_name)
+    stem = _safe_stem(output_name, 'CardForge')
+    face_file = out / (f'{stem}_Face.3mf' if output_name else 'CardForge_Face.3mf')
+    export_3mf(parts,face_file, project.hueforge.palette)
     stls=out/'Aligned_STLs'
     stls.mkdir(exist_ok=True)
     info=[]
@@ -278,18 +289,18 @@ def export_face(project, output, include_base=False):
         part['mesh'].export(stls/name)
         info.append({'part':part['name'],'suggested_color':part['color'],'stl':name})
     if include_base:
-        export_base_stl(out/'CardForge_NFC_Base.stl',project.geometry,project.nfc)
-    project.save_bundle(out/'CardForge_Project.cardforge')
-    (out/'Parts.json').write_text(json.dumps(info,indent=2),encoding='utf-8')
-    (out/'PRINT_README.txt').write_text('''CARDFORGE FLUSH FACE
-Open CardForge_Face.3mf as a model in Bambu Studio. The face is one assembly with named parts. Assign filaments in Objects/Parts. If using STLs, select ALL Aligned_STLs files together and answer Yes to loading as a single object with multiple parts. Do not auto-arrange individual parts or drop the backing to the bed.
+        export_base_stl(out/(f'{stem}_NFC_Base.stl' if output_name else 'CardForge_NFC_Base.stl'),project.geometry,project.nfc)
+    project.save_bundle(out/(f'{stem}_Project.cardforge' if output_name else 'CardForge_Project.cardforge'))
+    (out/(f'{stem}_Parts.json' if output_name else 'Parts.json')).write_text(json.dumps(info,indent=2),encoding='utf-8')
+    (out/(f'{stem}_PRINT_README.txt' if output_name else 'PRINT_README.txt')).write_text('''CARDFORGE FLUSH FACE
+Open {face_file.name} as a model in Bambu Studio. The face is one assembly with named parts. Assign filaments in Objects/Parts. If using STLs, select ALL Aligned_STLs files together and answer Yes to loading as a single object with multiple parts. Do not auto-arrange individual parts or drop the backing to the bed.
 
 The model is already artwork-side down and mirrored correctly. Do not mirror or flip it again. Both exterior faces are flat. Text/logo occupy only the first front layers; Solid backing starts above them. Use a layer height and first layer that divide the front depth (default: two 0.2 mm front layers and two 0.2 mm backing layers). Assign the background and backing the same filament if desired.
 
-Photos are layout references. Only editable text and the extracted/replacement logo become inlay geometry. Remove the logo background before export. Transparent/antialiased edges are thresholded; logo colors map to the four selected palette colors. Fine features still require a slicer preview and test print.
+Photos are layout references. Editable text, logos and added image elements become inlay geometry. Remove unwanted image backgrounds before export. Transparent/antialiased edges are thresholded; image colors map to the four selected palette colors. Fine features still require a slicer preview and test print.
 
 Print the NFC base separately, install the tag and test-fit the face before gluing. No HueForge software is needed.
-''',encoding='utf-8')
+'''.replace('{face_file.name}', face_file.name),encoding='utf-8')
     return out
 
 
@@ -301,10 +312,12 @@ def build_logo_parts(project):
     with the face export while omitting the card background and backing sheet.
     """
     logo = project.logo
-    if not logo.enabled or not logo.path:
-        raise ValueError('Load or extract a logo before creating logo geometry.')
-    if not Path(logo.path).exists():
-        raise ValueError(f'Logo file was not found: {logo.path}')
+    layers = [logo, *getattr(project, 'elements', [])]
+    if not any(x and x.enabled and x.path for x in layers):
+        raise ValueError('Load at least one image before creating image geometry.')
+    for layer in layers:
+        if layer and layer.enabled and layer.path and not Path(layer.path).exists():
+            raise ValueError(f'Image element was not found: {layer.path}')
     regions, _, depth, _ = face_regions(project, include_text=False)
     fw, fh = face_target_dimensions(project.geometry)
     parts = []
@@ -318,11 +331,13 @@ def build_logo_parts(project):
     return parts
 
 
-def export_logo(project, output):
+def export_logo(project, output, output_name=None):
     """Export standalone logo geometry as a named 3MF and aligned STLs."""
     parts = build_logo_parts(project)
-    out = _export_folder(output, 'CardForge_Logo')
-    export_3mf(parts, out / 'CardForge_Logo.3mf', project.hueforge.palette, 'CardForge standalone logo')
+    out = _export_folder(output, 'CardForge_Logo', output_name)
+    stem = _safe_stem(output_name, 'CardForge')
+    logo_file = out / (f'{stem}_Logo.3mf' if output_name else 'CardForge_Logo.3mf')
+    export_3mf(parts, logo_file, project.hueforge.palette, 'CardForge standalone logo')
     stls = out / 'Logo_STLs'
     stls.mkdir(exist_ok=True)
     info = []
@@ -332,27 +347,47 @@ def export_logo(project, output):
         part['mesh'].export(stls / name)
         info.append({'part': part['name'], 'suggested_color': part['color'], 'stl': name})
     combined = prism(unary_union([part['polygon'] for part in parts]), 0, project.face.front_depth_mm)
-    combined.export(out / 'CardForge_Logo.stl')
-    (out / 'Logo_Parts.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
-    (out / 'LOGO_README.txt').write_text('''CARDFORGE STANDALONE LOGO
+    combined.export(out / (f'{stem}_Logo.stl' if output_name else 'CardForge_Logo.stl'))
+    (out / (f'{stem}_Logo_Parts.json' if output_name else 'Logo_Parts.json')).write_text(json.dumps(info, indent=2), encoding='utf-8')
+    (out / (f'{stem}_LOGO_README.txt' if output_name else 'LOGO_README.txt')).write_text('''CARDFORGE STANDALONE LOGO
 
-CardForge_Logo.3mf contains the logo as named, separate color parts. Assign
+{logo_file.name} contains the images as named, separate color parts. Assign
 filaments under Objects / Parts in Bambu Studio. Logo_STLs contains the same
 parts aligned to one origin; load all files together as one multipart object.
-CardForge_Logo.stl is a combined single-color copy for quick inspection.
+The combined Logo STL is a single-color copy for quick inspection.
 
 The logo is mirrored for artwork-side-down printing and occupies the selected
 front inlay depth. It has a flat top and bottom so it can be placed on the
 CardForge face or used as a separate insert. Inspect the slicer preview before
 printing small details.
-''', encoding='utf-8')
+'''.replace('{logo_file.name}', logo_file.name), encoding='utf-8')
     return out
 
 
-def _export_folder(parent, name):
+def _safe_stem(value, fallback='CardForge'):
+    import re
+    value = re.sub(r'[^A-Za-z0-9._-]+', '_', str(value or '').strip()).strip('._-')
+    value = value[:80].rstrip(' .') or fallback
+    # Windows reserves these names even when followed by a file extension.
+    if value.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}:
+        value = '_' + value
+    return value
+
+
+def _export_folder(parent, name, output_name=None):
     from datetime import datetime
     import tempfile
     Path(parent).mkdir(parents=True, exist_ok=True)
+    if output_name:
+        root = Path(parent) / _safe_stem(output_name)
+        for index in range(1, 10000):
+            candidate = root if index == 1 else Path(parent) / f'{root.name}_{index}'
+            try:
+                candidate.mkdir(exist_ok=False)
+                return candidate
+            except FileExistsError:
+                continue
+        raise ValueError('Too many exports share that name. Choose a different package name.')
     return Path(tempfile.mkdtemp(prefix=name+'_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_', dir=parent))
 
 

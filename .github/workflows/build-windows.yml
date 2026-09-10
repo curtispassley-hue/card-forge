@@ -1,4 +1,4 @@
-name: Build CardForge4D 0.7 Windows App
+name: Build CardForge4D 0.7.1 Windows App
 
 on:
   workflow_dispatch:
@@ -84,10 +84,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $tag = 'v0.7.0-preview.${{ github.run_number }}'
+          $tag = 'v0.7.1-preview.${{ github.run_number }}'
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.7 Preview' --notes-file RELEASE_NOTES_0_6.md
+            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.7.1 Preview' --notes-file RELEASE_NOTES_0_6.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
           gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json defender-scan.json --clobber

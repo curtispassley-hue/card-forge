@@ -22,6 +22,7 @@ class TextLayer:
 
 @dataclass
 class LogoLayer:
+    name: str = "Logo"
     path: str = ""
     x_mm: float = 20.0
     y_mm: float = 25.4
@@ -67,6 +68,7 @@ class EditorSettings:
     show_nfc_guide: bool = True
     auto_fit_source: bool = True
     ocr_remove_original: bool = True
+    grayscale_artwork: bool = False
 
 
 @dataclass
@@ -93,6 +95,9 @@ class Project:
     editor: EditorSettings = field(default_factory=EditorSettings)
     texts: list[TextLayer] = field(default_factory=list)
     logo: LogoLayer = field(default_factory=LogoLayer)
+    # Additional raster image elements. The legacy ``logo`` field is
+    # retained as the first element so projects from 0.4–0.7 remain portable.
+    elements: list[LogoLayer] = field(default_factory=list)
     face: FaceSettings = field(default_factory=FaceSettings)
 
     def save(self, path: str | Path) -> None:
@@ -108,6 +113,7 @@ class Project:
         data["face"] = FaceSettings(**data.get("face", {}))
         data["texts"] = [TextLayer(**x) for x in data.get("texts", [])]
         data["logo"] = LogoLayer(**data.get("logo", {}))
+        data["elements"] = [LogoLayer(**x) for x in data.get("elements", [])]
         data.setdefault("format_version", "0.2.0")
         data.setdefault("manual_corners", [])
         data.setdefault("cleaned_image", "")
@@ -153,6 +159,8 @@ class Project:
         for key in ("source_image", "corrected_image", "cleaned_image"):
             data[key] = bundle_asset(data.get(key, ""), key)
         data["logo"]["path"] = bundle_asset(data.get("logo", {}).get("path", ""), "logo")
+        for i, element in enumerate(data.get("elements", [])):
+            element["path"] = bundle_asset(element.get("path", ""), f"element_{i}")
         for i, layer in enumerate(data["texts"]):
             layer["font_path"] = bundle_asset(layer.get("font_path", ""), f"font_{i}")
         imported = Path(self.hueforge_import_path) if self.hueforge_import_path else None
@@ -210,4 +218,6 @@ class Project:
             layer["font_path"] = resolve(layer.get("font_path", ""))
         if "logo" in data:
             data["logo"]["path"] = resolve(data["logo"].get("path", ""))
+        for element in data.get("elements", []):
+            element["path"] = resolve(element.get("path", ""))
         return cls.from_dict(data)

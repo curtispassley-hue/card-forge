@@ -6,12 +6,75 @@ from pathlib import Path
 import tempfile
 from PIL import Image, ImageDraw, ImageFont
 from cardforge.core.logo import remove_logo_background
-from cardforge.core.image_processing import nearest_palette_preview, hex_to_rgb
-from cardforge.core.project import Project, TextLayer
-from cardforge.core.face import build_face, export_face, export_logo
+from cardforge.core.image_processing import nearest_palette_preview, hex_to_rgb, compose_editable_layers
+from cardforge.core.project import Project, TextLayer, LogoLayer
+from cardforge.core.face import build_face, export_face, export_logo, artwork_masks, _safe_stem
 from cardforge.core.fonts import bundled_fonts
 
 class EditorTests(unittest.TestCase):
+    def test_multiple_images_portable_named_export_and_grayscale(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            p = Project()
+            original = Image.new('RGBA', (100, 100), (0, 0, 0, 0))
+            ImageDraw.Draw(original).ellipse((10, 10, 90, 90), fill='#D92D20')
+            for name, x in [('Badge', 25), ('Emblem', 32), ('Hidden', 60)]:
+                path = root / (name + '.png')
+                original.save(path)
+                p.elements.append(LogoLayer(name=name, path=str(path), x_mm=x, y_mm=25,
+                                           width_mm=18, enabled=name != 'Hidden'))
+            before = Path(p.elements[0].path).read_bytes()
+            parts = build_face(p)
+            names = [x['name'] for x in parts]
+            self.assertTrue(any(n.startswith('Badge -') for n in names))
+            self.assertTrue(any(n.startswith('Emblem -') for n in names))
+            self.assertFalse(any(n.startswith('Hidden -') for n in names))
+            self.assertTrue(all(x['mesh'].is_watertight and x['mesh'].is_winding_consistent for x in parts))
+            # Overlapping images carve complementary regions; no double volume.
+            expected = parts[-1]['polygon'].area * p.face.thickness_mm
+            self.assertAlmostEqual(sum(x['mesh'].volume for x in parts), expected, delta=expected*.0001)
+            p.editor.grayscale_artwork = True
+            p.hueforge.palette = ['#111111', '#666666', '#BBBBBB', '#FFFFFF']
+            masks, _, _, _, _ = artwork_masks(p)
+            badge = [(c, m) for n, c, m in masks if n.startswith('Badge') and m.any()]
+            self.assertEqual([c for c, _ in badge], ['#666666'])
+            preview = np.asarray(compose_editable_layers(Image.new('RGB', (889, 508), 'white'),
+                88.9, 50.8, p.texts, p.logo, p.elements, True))
+            self.assertTrue(np.array_equal(preview[:,:,0], preview[:,:,1]))
+            self.assertTrue(np.array_equal(preview[:,:,1], preview[:,:,2]))
+            self.assertTrue(np.any(preview != 255))
+            self.assertTrue(np.all(preview[0,0] == 255))
+            self.assertEqual(Path(p.elements[0].path).read_bytes(), before)
+            saved = p.save_bundle(root / 'portable.cardforge')
+            for element in p.elements:
+                Path(element.path).unlink()
+            restored = Project.load_bundle(saved, root / 'restored')
+            self.assertEqual([e.name for e in restored.elements], ['Badge', 'Emblem', 'Hidden'])
+            self.assertTrue(all(Path(e.path).exists() for e in restored.elements))
+            self.assertTrue(restored.editor.grayscale_artwork)
+            self.assertFalse(restored.elements[-1].enabled)
+            out = export_face(restored, root/'exports', True, 'My Card')
+            self.assertEqual(out.name, 'My_Card')
+            for name in ('My_Card_Face.3mf', 'My_Card_NFC_Base.stl', 'My_Card_Project.cardforge'):
+                self.assertTrue((out/name).is_file(), name)
+            self.assertIn('My_Card_Face.3mf', (out/'My_Card_PRINT_README.txt').read_text())
+            original_3mf = (out/'My_Card_Face.3mf').read_bytes()
+            again = export_face(restored, root/'exports', output_name='My Card')
+            self.assertEqual(again.name, 'My_Card_2')
+            self.assertEqual((out/'My_Card_Face.3mf').read_bytes(), original_3mf)
+            logo = export_logo(restored, root/'exports', output_name='Icons')
+            self.assertTrue((logo/'Icons_Logo.stl').is_file())
+            self.assertTrue((logo/'Icons_Logo.3mf').is_file())
+
+    def test_legacy_project_and_windows_export_names(self):
+        p = Project.from_dict({'logo': {'path': 'old-logo.png'}, 'editor': {'snap_mm': .5}})
+        self.assertEqual(p.logo.path, 'old-logo.png')
+        self.assertEqual(p.elements, [])
+        self.assertFalse(p.editor.grayscale_artwork)
+        self.assertEqual(_safe_stem('../../CON'), '_CON')
+        self.assertEqual(_safe_stem('LPT1.txt'), '_LPT1.txt')
+        self.assertNotIn('/', _safe_stem('../My Card/'))
+
     def test_bundled_font_library(self):
         self.assertGreaterEqual(len(bundled_fonts()), 30)
         self.assertTrue(all(Path(path).exists() for path in bundled_fonts().values()))

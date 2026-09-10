@@ -151,8 +151,13 @@ def fit_card_image(im: Image.Image, ratio: float = CARD_RATIO, width_px: int = 1
     return im.resize((width_px, int(round(width_px / ratio))), Image.Resampling.LANCZOS)
 
 
-def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float, texts, logo) -> Image.Image:
+def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float, texts, logo,
+                            elements=None, grayscale=False) -> Image.Image:
+    """Render editable artwork for the canvas, including additional PNG elements."""
     out = base.convert("RGBA")
+    if grayscale:
+        gray = out.convert("L")
+        out = Image.merge("RGBA", (gray, gray, gray, out.getchannel("A")))
     draw = ImageDraw.Draw(out)
     ppm = out.width / width_mm
 
@@ -168,17 +173,22 @@ def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float
         y = int(round(out.height - layer.y_mm * ppm))
         draw.text((x, y), layer.text, font=font, fill=layer.color, anchor="mm")
 
-    if logo and getattr(logo, "enabled", True) and logo.path and Path(logo.path).exists():
+    for element in [logo, *(elements or [])]:
+        if not element or not getattr(element, "enabled", True) or not element.path or not Path(element.path).exists():
+            continue
         try:
-            lg = Image.open(logo.path).convert("RGBA")
-            target_w = max(8, int(round(logo.width_mm * ppm)))
+            lg = Image.open(element.path).convert("RGBA")
+            if grayscale:
+                gray = lg.convert("L")
+                lg = Image.merge("RGBA", (gray, gray, gray, lg.getchannel("A")))
+            target_w = max(8, int(round(element.width_mm * ppm)))
             target_h = max(8, int(round(lg.height * target_w / lg.width)))
             lg = lg.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            if logo.opacity < 255:
-                alpha = lg.getchannel("A").point(lambda p: int(p * logo.opacity / 255))
+            if element.opacity < 255:
+                alpha = lg.getchannel("A").point(lambda p: int(p * element.opacity / 255))
                 lg.putalpha(alpha)
-            x = int(round(logo.x_mm * ppm - target_w / 2))
-            y = int(round(out.height - logo.y_mm * ppm - target_h / 2))
+            x = int(round(element.x_mm * ppm - target_w / 2))
+            y = int(round(out.height - element.y_mm * ppm - target_h / 2))
             out.alpha_composite(lg, (x, y))
         except Exception:
             pass

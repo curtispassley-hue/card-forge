@@ -1,7 +1,11 @@
-CardForge 4D 0.7 Preview
+CardForge 4D 0.7.1 Preview
 
 This release removes HueForge from the face production path. CardForge creates a direct Bambu Studio multipart 3MF plus aligned STLs.
 
+- Export dialogs now offer a package name and destination folder. Named 3MF/project/instruction files are grouped together; repeated names get a numbered folder without replacing earlier exports.
+- Added multi-select PNG import and an Images panel with independent names, visibility, size, position, centering, background cleanup, and canvas dragging. All images are included in portable projects and become named flush color parts.
+- Added reversible grayscale image conversion and a four-shade grayscale filament preset. Transparency and original source files are preserved.
+- Removed the redundant Next / Back button row. Use the labeled numbered tabs to change steps.
 - Added photo-free Blank card, Business card, and Membership card starter templates.
 - Added a guided Design studio with separate Text, Logo, and Photo panels, original line icons, live font preview, palette-color buttons, and a clearer card canvas.
 - Added a safe portable save path for scratch designs and a close prompt for unsaved changes.
@@ -18,7 +22,7 @@ This release removes HueForge from the face production path. CardForge creates a
 - Logo extrusion now repairs tiny raster slits and narrow counters with a bounded close/open and a filtered triangulation fallback, preventing common “closed solid” export failures.
 - Controls use grouped sections, consistent action hierarchy, and compact text icons so the five-step workflow is easier to follow.
 - Added 30 bundled OFL sample fonts with live text previews.
-- Next / Back navigation, Undo / Redo, and responsive export remain available.
+- Undo / Redo and responsive export remain available.
 - Direct face export includes optional NFC base and a print guide.
 
 Download CardForge4D-Windows.zip, Extract All, and run `CardForge4D/CardForge4D.exe`. Keep `_internal` beside it. Python is not required. The extracted-folder package avoids the self-extracting one-file pattern that triggered antivirus heuristics on the previous build.

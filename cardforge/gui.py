@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 
-from .core.project import Project, TextLayer
+from .core.project import Project, TextLayer, LogoLayer
 from .core.face import export_face, export_logo, face_preview, palette_color
 from .core.fonts import bundled_fonts, default_font
 from .core.templates import TEMPLATES, create_template
@@ -32,7 +32,7 @@ from .core.geometry import export_base_stl, make_face_blank, face_target_dimensi
 from .core.hueforge import import_hueforge_path  # legacy reader for 0.4 projects
 
 
-VERSION = "0.7 Preview"
+VERSION = "0.7.1 Preview"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
@@ -117,8 +117,10 @@ class CardForgeApp(tk.Tk):
                  '✓': 'check', '＋': 'plus', '−': 'minus', '×': 'delete', '⇩': 'download',
                  '✎': 'edit', '✂': 'crop', '⌕': 'search', '↺': 'undo', '↻': 'refresh',
                  '□': 'crop', '⌖': 'crop', '◉': 'layers'}
-        image = self.icons.get(names.get(icon, icon or 'card'), style == 'Accent.TButton')
-        return ttk.Button(parent, text='  '+label, command=command, style=style, image=image, compound='left')
+        if icon:
+            image = self.icons.get(names.get(icon, icon), style == 'Accent.TButton')
+            return ttk.Button(parent, text=label, command=command, style=style, image=image, compound='left')
+        return ttk.Button(parent, text=label, command=command, style=style)
 
     def _scroll_panel(self, parent):
         shell = ttk.Frame(parent, width=340)
@@ -147,8 +149,6 @@ class CardForgeApp(tk.Tk):
             return
         i = self.tabs.index(self.tabs.select())
         self.step_label.configure(text=f'Step {i+1} of 5')
-        self.back_button.configure(state='disabled' if i == 0 else 'normal')
-        self.next_button.configure(state='disabled' if i == 4 else 'normal')
         if i == 1:
             self.after_idle(self.refresh_design_preview)
         elif i == 2:
@@ -327,12 +327,9 @@ class CardForgeApp(tk.Tk):
 
         nav = ttk.Frame(self, padding=(18, 8))
         nav.pack(fill='x')
-        self.back_button = self._button(nav, 'Back', lambda: self.navigate(-1), '‹')
-        self.back_button.pack(side='left')
         self.step_label = ttk.Label(nav, style='Step.TLabel')
-        self.step_label.pack(side='left', padx=16)
-        self.next_button = self._button(nav, 'Next', lambda: self.navigate(1), '›', 'Accent.TButton')
-        self.next_button.pack(side='right')
+        self.step_label.pack(side='left')
+        ttk.Label(nav, text='Choose a numbered tab above to change steps.', style='Muted.TLabel').pack(side='right')
         self.progress = ttk.Progressbar(self, mode='indeterminate')
         self.progress.pack(fill='x', padx=18)
         ttk.Label(self, textvariable=self.status, anchor='w', padding=(18, 8)).pack(fill='x')
@@ -376,7 +373,7 @@ class CardForgeApp(tk.Tk):
         actions = ttk.Frame(left)
         actions.pack(fill='x', pady=(0, 10))
         self._button(actions, 'Add text', self.add_text, 'text', 'Accent.TButton').pack(side='left', fill='x', expand=True, padx=(0, 3))
-        self._button(actions, 'Add logo', self.load_logo, 'image').pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self._button(actions, 'Add images', self.load_elements, 'image').pack(side='left', fill='x', expand=True, padx=(3, 0))
         self.editor_tabs = ttk.Notebook(left)
         self.editor_tabs.pack(fill='both', expand=True)
         text_panel = ttk.Frame(self.editor_tabs, padding=(4, 10))
@@ -385,6 +382,8 @@ class CardForgeApp(tk.Tk):
         self.editor_tabs.add(text_panel, text='Text')
         self.editor_tabs.add(logo_frame, text='Logo')
         self.editor_tabs.add(photo, text='Photo')
+        images_panel = ttk.Frame(self.editor_tabs, padding=(4, 10))
+        self.editor_tabs.add(images_panel, text='Images')
         ttk.Label(text_panel, text='Double-click a layer to edit it.', style='Muted.TLabel').pack(anchor='w', pady=(0, 8))
         self.text_list = tk.Listbox(text_panel, width=30, height=10, exportselection=False,
                                    bg='white', fg='#243247', selectbackground='#245edb',
@@ -420,6 +419,34 @@ class CardForgeApp(tk.Tk):
         self._button(logo_frame, 'Export logo STL + 3MF', self.export_logo_stl, 'download', 'Accent.TButton').pack(fill='x', pady=6)
         ttk.Label(logo_frame, text='Transparent PNG works best. Undo restores any cleanup or position change.',
                   wraplength=280, style='Muted.TLabel').pack(anchor='w', pady=4)
+        logo_frame = images_panel
+        ttk.Label(logo_frame, text='Icons and emblems', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
+        ttk.Label(logo_frame, text='Select multiple PNGs at once. Drag them on the card or enter a size and position below.',
+                  wraplength=280, style='Muted.TLabel').pack(anchor='w', pady=(2, 6))
+        self.element_list = tk.Listbox(logo_frame, height=7, exportselection=False,
+                                       bg='white', fg='#243247', selectbackground='#245edb',
+                                       relief='flat', highlightthickness=1, highlightbackground='#cbd5e1')
+        self.element_list.pack(fill='x', pady=(0, 5))
+        self.element_list.bind('<<ListboxSelect>>', lambda e: self.select_element())
+        row = ttk.Frame(logo_frame); row.pack(fill='x')
+        self._button(row, 'Load PNGs', self.load_elements, 'image').pack(side='left', fill='x', expand=True, padx=(0, 3))
+        self._button(row, 'Remove', self.remove_element, 'delete', 'Danger.TButton').pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.element_x, self.element_y, self.element_w = tk.DoubleVar(), tk.DoubleVar(), tk.DoubleVar()
+        self.element_name = tk.StringVar()
+        self.element_enabled = tk.BooleanVar(value=True)
+        self._field(logo_frame, 'Element name', self.element_name)
+        ttk.Checkbutton(logo_frame, text='Include this image', variable=self.element_enabled,
+                        command=self.apply_element).pack(anchor='w', pady=6)
+        for label, var in [('Element X (mm)', self.element_x), ('Element Y (mm)', self.element_y), ('Element width (mm)', self.element_w)]:
+            self._field(logo_frame, label, var)
+        row = ttk.Frame(logo_frame); row.pack(fill='x')
+        self._button(row, 'Apply element', self.apply_element, 'check').pack(side='left', fill='x', expand=True, padx=(0, 3))
+        self._button(row, 'Center element', self.center_element, 'card').pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self._field(logo_frame, 'Background tolerance', self.bg_tolerance)
+        self._button(logo_frame, 'Remove background', self.clean_element_background, 'sparkle').pack(fill='x', pady=6)
+        ttk.Label(logo_frame, text='The last image in the list is on top. Each visible image exports as named color parts. Undo restores edits.',
+                  wraplength=280, style='Muted.TLabel').pack(anchor='w', pady=8)
+        self._button(logo_frame, 'Export images STL + 3MF', self.export_logo_stl, 'download').pack(fill='x')
         ttk.Label(photo, text='A photo is a layout reference. Scan its text and extract its logo to create printable parts.',
                   wraplength=280, style='Muted.TLabel').pack(anchor='w', pady=(0, 10))
         for label, cmd, icon in [('Scan text offline', self.run_ocr, 'search'), ('Find logo candidate', self.auto_find_logo, 'search'),
@@ -443,8 +470,7 @@ class CardForgeApp(tk.Tk):
         self._button(footer, 'Refresh', self.refresh_design_preview, 'refresh').pack(side='right')
 
     def _face_ui(self):
-        left = ttk.Frame(self.hf_tab)
-        left.pack(side="left", fill="y", padx=(0, 12))
+        left = self._scroll_panel(self.hf_tab)
         right = ttk.Frame(self.hf_tab)
         right.pack(side="right", fill="both", expand=True)
 
@@ -469,9 +495,25 @@ class CardForgeApp(tk.Tk):
         self._field(left, "Front color depth mm", self.transparent_cap)
 
         self._button(left, 'Preview Face', self.refresh_face_preview, '◉').pack(fill='x', pady=4)
+        self.grayscale_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(left, text='Grayscale source and image elements', variable=self.grayscale_var,
+                        command=self.toggle_grayscale).pack(anchor='w', pady=(2, 6))
+        self._button(left, 'Use four grayscale filaments', self.grayscale_palette, 'layers').pack(fill='x', pady=4)
+        ttk.Label(left, text='Grayscale images still map to your chosen filaments. Use gray filament shades for a grayscale print.',
+                  wraplength=290, style='Muted.TLabel').pack(anchor='w', pady=4)
         ttk.Label(left, text='Thirty bundled OFL fonts are available when editing text.', wraplength=300, style='Muted.TLabel').pack(anchor='w', pady=(0, 6))
         self._button(left, 'Choose Background Color', self.pick_face_background, '●').pack(fill='x', pady=4)
         self._button(left, 'Export Face 3MF + STLs…', self.export_face_files, '⇩', 'Accent.TButton').pack(fill='x', pady=4)
+        output = ttk.LabelFrame(left, text='Output files', style='Section.TLabelframe')
+        output.pack(fill='x', pady=(10, 4))
+        ttk.Label(output, text='Choose a folder and a package name before exporting. Existing names are kept safe with a _2 suffix.',
+                  wraplength=300, style='Muted.TLabel').pack(anchor='w', pady=(0, 6))
+        self.output_name_var = tk.StringVar(value='My_Card')
+        self.output_dir_var = tk.StringVar(value='')
+        self._field(output, 'Package name', self.output_name_var)
+        row = ttk.Frame(output); row.pack(fill='x', pady=2)
+        ttk.Entry(row, textvariable=self.output_dir_var).pack(side='left', fill='x', expand=True)
+        self._button(row, 'Browse', self.browse_output_folder, 'folder').pack(side='right', padx=(5, 0))
         ttk.Label(right, text='Front layers: flush text and logo inlays. Back layers: a continuous solid sheet. Both sides are flat. Assign colors to named parts in Bambu Studio.', wraplength=680, font=('Segoe UI', 11)).pack(anchor='nw')
         ttk.Label(right, text='The photo is a layout reference. Scan/retype text and extract or load your logo to create printable elements. No HueForge step is required.', wraplength=680).pack(anchor='nw', pady=8)
 
@@ -696,6 +738,8 @@ class CardForgeApp(tk.Tk):
             self.project.geometry.card_height_mm,
             self.project.texts,
             self.project.logo,
+            self.project.elements,
+            self.project.editor.grayscale_artwork,
         )
 
     def show_image_on_canvas(self, image, canvas, key):
@@ -755,6 +799,7 @@ class CardForgeApp(tk.Tk):
             return
         self.show_image_on_canvas(im, self.design_canvas, "design")
         self.refresh_text_list()
+        self.refresh_element_list()
         self.draw_editor_guides()
 
     def draw_editor_guides(self):
@@ -777,8 +822,10 @@ class CardForgeApp(tk.Tk):
             if p:
                 c.create_rectangle(p[0]-4, p[1]-4, p[0]+4, p[1]+4,
                                    outline="#00e5ff", width=2, tags="guide")
-        if self.project.logo.path and self.project.logo.enabled:
-            p = self.card_mm_to_canvas(self.project.logo.x_mm, self.project.logo.y_mm)
+        for element in [self.project.logo, *self.project.elements]:
+            if not element.path or not element.enabled:
+                continue
+            p = self.card_mm_to_canvas(element.x_mm, element.y_mm)
             if p:
                 c.create_oval(p[0]-5, p[1]-5, p[0]+5, p[1]+5,
                               outline="#ffdc5e", width=2, tags="guide")
@@ -921,6 +968,7 @@ class CardForgeApp(tk.Tk):
             with Image.open(p) as candidate:
                 candidate.verify()
             self.project.logo.path = p
+            self.project.logo.name = Path(p).stem
             self.project.logo.opacity = 255
             self.logo_opacity.set(100)
             self.editor_tabs.select(1)
@@ -929,6 +977,98 @@ class CardForgeApp(tk.Tk):
             self.refresh_logo_preview()
             self.refresh_design_preview()
             self.status.set(f'Loaded logo: {Path(p).name}')
+
+    def refresh_element_list(self):
+        selected = self.element_list.curselection()
+        self.element_list.delete(0, tk.END)
+        for i, element in enumerate(self.project.elements):
+            self.element_list.insert(tk.END, f'{i+1}. {element.name}' + ('' if element.enabled else ' (hidden)'))
+        if self.project.elements:
+            self.element_list.selection_set(min(selected[0] if selected else 0, len(self.project.elements)-1))
+
+    def select_element(self):
+        sel = self.element_list.curselection()
+        if not sel or sel[0] >= len(self.project.elements):
+            return
+        element = self.project.elements[sel[0]]
+        self.element_name.set(element.name)
+        self.element_x.set(element.x_mm)
+        self.element_y.set(element.y_mm)
+        self.element_w.set(element.width_mm)
+        self.element_enabled.set(element.enabled)
+
+    def load_elements(self):
+        paths = filedialog.askopenfilenames(title='Add icons and emblems — select one or more images',
+                    filetypes=[('PNG images', '*.png'), ('Images', '*.png *.jpg *.jpeg *.webp *.bmp')])
+        if not paths:
+            return
+        for path in paths:
+            with Image.open(path) as candidate:
+                candidate.verify()
+        g = self.project.geometry
+        for i, path in enumerate(paths):
+            self.project.elements.append(LogoLayer(name=Path(path).stem, path=str(path),
+                x_mm=g.card_width_mm/2 + (i % 3-1)*min(12, g.card_width_mm/4),
+                y_mm=g.card_height_mm/2, width_mm=min(12, g.card_width_mm/3)))
+        self.refresh_element_list()
+        self.element_list.selection_clear(0, tk.END)
+        self.element_list.selection_set(len(self.project.elements)-len(paths))
+        self.select_element()
+        self.editor_tabs.select(3)
+        self.refresh_design_preview()
+        self.status.set(f'Added {len(paths)} image(s). Select one to resize it, or drag it on the card.')
+
+    def apply_element(self):
+        sel = self.element_list.curselection()
+        if not sel:
+            return
+        x, y, width = (float(v.get()) for v in (self.element_x, self.element_y, self.element_w))
+        if not all(math.isfinite(v) for v in (x, y, width)) or not 0.5 <= width <= 256:
+            raise ValueError('Image width must be 0.5–256 mm. Use valid numbers for its position.')
+        element = self.project.elements[sel[0]]
+        element.x_mm, element.y_mm, element.width_mm = x, y, width
+        element.name = self.element_name.get().strip() or 'Image'
+        element.enabled = self.element_enabled.get()
+        self.refresh_design_preview()
+
+    def remove_element(self):
+        sel = self.element_list.curselection()
+        if sel:
+            del self.project.elements[sel[0]]
+            self.refresh_element_list()
+            self.select_element()
+            self.refresh_design_preview()
+
+    def center_element(self):
+        self.element_x.set(self.project.geometry.card_width_mm/2)
+        self.element_y.set(self.project.geometry.card_height_mm/2)
+        self.apply_element()
+
+    def clean_element_background(self):
+        sel = self.element_list.curselection()
+        if not sel:
+            return
+        self.apply_element()
+        element = self.project.elements[sel[0]]
+        out = self.tempdir / (uuid.uuid4().hex + '_transparent_element.png')
+        with Image.open(element.path) as im:
+            remove_logo_background(im, float(self.bg_tolerance.get())).save(out)
+        element.path = str(out)
+        self.refresh_design_preview()
+        self.status.set('Image background removed. Undo restores the original.')
+
+    def toggle_grayscale(self):
+        self.project.editor.grayscale_artwork = self.grayscale_var.get()
+        self.refresh_design_preview()
+        self.refresh_face_preview()
+
+    def grayscale_palette(self):
+        self.project.hueforge.palette = ['#111111', '#666666', '#BBBBBB', '#FFFFFF']
+        self.project.hueforge.filament_names = ['Black', 'Dark gray', 'Light gray', 'White']
+        self.project.editor.grayscale_artwork = True
+        self.sync_ui_from_project()
+        self.refresh_design_preview()
+        self.refresh_face_preview()
 
     def apply_logo(self):
         values = [float(v.get()) for v in (self.logo_x, self.logo_y, self.logo_w, self.logo_opacity)]
@@ -971,14 +1111,16 @@ class CardForgeApp(tk.Tk):
             half_h = max(1.5, em * 0.65)
             if abs(x - t.x_mm) <= half_w and abs(y - t.y_mm) <= half_h:
                 candidates.append((math.hypot(x-t.x_mm, y-t.y_mm), ("text", i)))
-        if self.project.logo.path and self.project.logo.enabled:
+        for kind, index, element in [('logo', 0, self.project.logo)] + [('element', i, e) for i, e in enumerate(self.project.elements)]:
+            if not element.path or not element.enabled:
+                continue
             try:
-                im = Image.open(self.project.logo.path)
-                h_mm = self.project.logo.width_mm * im.height / max(1, im.width)
+                with Image.open(element.path) as im:
+                    h_mm = element.width_mm * im.height / max(1, im.width)
             except Exception:
-                h_mm = self.project.logo.width_mm
-            if abs(x-self.project.logo.x_mm) <= self.project.logo.width_mm/2 and abs(y-self.project.logo.y_mm) <= h_mm/2:
-                candidates.append((math.hypot(x-self.project.logo.x_mm, y-self.project.logo.y_mm), ("logo", 0)))
+                h_mm = element.width_mm
+            if abs(x-element.x_mm) <= element.width_mm/2 and abs(y-element.y_mm) <= h_mm/2:
+                candidates.append((math.hypot(x-element.x_mm, y-element.y_mm), (kind, index)))
         if candidates:
             self._drag_before = self._snapshot()
             candidates.sort(key=lambda z: z[0])
@@ -988,6 +1130,11 @@ class CardForgeApp(tk.Tk):
                 self.text_list.selection_clear(0, tk.END)
                 self.text_list.selection_set(self.drag_target[1])
                 self.editor_tabs.select(0)
+            elif self.drag_target[0] == 'element':
+                self.element_list.selection_clear(0, tk.END)
+                self.element_list.selection_set(self.drag_target[1])
+                self.select_element()
+                self.editor_tabs.select(3)
             else:
                 self.editor_tabs.select(1)
 
@@ -1015,6 +1162,10 @@ class CardForgeApp(tk.Tk):
         if self.drag_target[0] == "text":
             t = self.project.texts[self.drag_target[1]]
             t.x_mm, t.y_mm = x, y
+        elif self.drag_target[0] == 'element':
+            element = self.project.elements[self.drag_target[1]]
+            element.x_mm, element.y_mm = x, y
+            self.element_x.set(x); self.element_y.set(y)
         else:
             self.project.logo.x_mm, self.project.logo.y_mm = x, y
             self.logo_x.set(x); self.logo_y.set(y)
@@ -1186,7 +1337,8 @@ class CardForgeApp(tk.Tk):
         g = self.project.geometry
         im = face_preview(self.project)
         self.show_image_on_canvas(im, self.hf_preview_canvas, 'face')
-        self._set_hf_info(f'Printable view uses your four filament colors. Sub-pixel contacts are cleaned before cutting matching parts.\n\n{len(self.project.texts)} text layer(s). Logo colors use the four-color palette.\nFront inlays: {self.project.face.front_depth_mm:.2f} mm\nSolid backing: {self.project.face.thickness_mm-self.project.face.front_depth_mm:.2f} mm\nExport produces named parts, ready to assign filaments in Bambu Studio.\nArtwork will be mirrored automatically for face-down printing.')
+        count = sum(bool(e.enabled and e.path) for e in [self.project.logo, *self.project.elements])
+        self._set_hf_info(f'Printable view uses your four filament colors. Sub-pixel contacts are cleaned before cutting matching parts.\n\n{len(self.project.texts)} text layer(s), {count} visible image(s).\nFront inlays: {self.project.face.front_depth_mm:.2f} mm\nSolid backing: {self.project.face.thickness_mm-self.project.face.front_depth_mm:.2f} mm\nExport produces named parts, ready to assign filaments in Bambu Studio.\nArtwork will be mirrored automatically for face-down printing.')
 
     def export_face_files(self):
         self._export_direct(False)
@@ -1195,38 +1347,85 @@ class CardForgeApp(tk.Tk):
         """Create a standalone logo package without rebuilding the card base."""
         if self.busy:
             return
-        if not self.project.logo.path or not Path(self.project.logo.path).exists():
-            messagebox.showinfo('CardForge', 'Load or extract a logo first.')
+        if not any(e.path and e.enabled for e in [self.project.logo, *self.project.elements]):
+            messagebox.showinfo('CardForge', 'Add an image or load a logo first.')
             return
-        self.apply_logo()
-        self.sync_face_fields()
-        self.apply_geometry()
-        out = filedialog.askdirectory(title='Choose standalone logo output folder')
-        if not out:
+        self._sync_edits()
+        settings = self._output_settings('Export image geometry')
+        if not settings:
             return
+        out, name = settings
         snapshot = copy.deepcopy(self.project)
         self._background(
             'Creating logo geometry…',
-            lambda: export_logo(snapshot, out),
+            lambda: export_logo(snapshot, out, output_name=name),
             lambda result: messagebox.showinfo(
                 'CardForge',
                 f'Logo files ready in:\n{result}\n\n'
-                'Open CardForge_Logo.3mf for named color parts, or use Logo_STLs together as one multipart object.'
+                'Open the Logo.3mf file for named color parts, or use Logo_STLs together as one multipart object.'
             ),
         )
 
     def _export_direct(self, include_base):
         if self.busy:
             return
-        self.sync_face_fields()
-        self.apply_logo()
-        self.apply_geometry()
-        out = filedialog.askdirectory(title='Choose CardForge face output folder')
-        if not out:
+        self._sync_edits()
+        settings = self._output_settings('Export complete card' if include_base else 'Export card face')
+        if not settings:
             return
+        out, name = settings
         snapshot = copy.deepcopy(self.project)
-        self._background('Generating flush face geometry…', lambda: export_face(snapshot, out, include_base),
-                         lambda result: messagebox.showinfo('CardForge', f'Face files ready in:\n{result}\n\nOpen CardForge_Face.3mf in Bambu Studio and assign filament colors under Objects / Parts.'))
+        self._background('Generating flush face geometry…', lambda: export_face(snapshot, out, include_base, output_name=name),
+                         lambda result: messagebox.showinfo('CardForge', f'Face files ready in:\n{result}\n\nOpen the Face.3mf file in Bambu Studio and assign filament colors under Objects / Parts.'))
+
+    def browse_output_folder(self):
+        current = self.output_dir_var.get().strip()
+        folder = filedialog.askdirectory(title='Choose where to save your exports',
+                                        initialdir=current if Path(current).is_dir() else None)
+        if folder:
+            self.output_dir_var.set(folder)
+
+    def _output_settings(self, title):
+        from .core.face import _safe_stem
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+        panel = ttk.Frame(win, padding=22); panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text=title, font=('Segoe UI', 17, 'bold')).pack(anchor='w', pady=(0, 12))
+        self._field(panel, 'Package name', self.output_name_var)
+        ttk.Label(panel, text='Destination folder').pack(anchor='w', pady=(10, 4))
+        row = ttk.Frame(panel); row.pack(fill='x')
+        ttk.Entry(row, textvariable=self.output_dir_var, width=50).pack(side='left', fill='x', expand=True)
+        self._button(row, 'Browse', self.browse_output_folder, 'folder').pack(side='left', padx=(6, 0))
+        ttk.Label(panel, text='A new folder with this name will contain the 3MF, STL parts and instructions.\nIf it already exists, a numbered suffix keeps your earlier files safe.',
+                  wraplength=510, style='Muted.TLabel').pack(anchor='w', pady=14)
+        error = tk.StringVar()
+        ttk.Label(panel, textvariable=error, foreground='#b42318', wraplength=510).pack(anchor='w')
+        result = []
+        def accept():
+            name = self.output_name_var.get().strip()
+            folder = self.output_dir_var.get().strip()
+            if not name:
+                error.set('Enter a package name.'); return
+            if not folder:
+                error.set('Choose a destination folder.'); return
+            path = Path(folder).expanduser()
+            if not path.is_dir():
+                error.set('Choose an existing destination folder with Browse.'); return
+            safe = _safe_stem(name)
+            self.output_name_var.set(safe)
+            self.output_dir_var.set(str(path))
+            result.append((str(path), safe))
+            win.destroy()
+        footer = ttk.Frame(panel); footer.pack(fill='x', pady=(14, 0))
+        self._button(footer, 'Cancel', win.destroy, 'back').pack(side='left')
+        self._button(footer, 'Export files', accept, 'download', 'Accent.TButton').pack(side='right')
+        win.bind('<Escape>', lambda e: win.destroy())
+        win.bind('<Return>', lambda e: accept())
+        self.wait_window(win)
+        return result[0] if result else None
 
     def import_flatforge_folder(self):
         folder = filedialog.askdirectory(title="Select FlatForge STL folder")
@@ -1464,10 +1663,16 @@ class CardForgeApp(tk.Tk):
             issues.append('Front color and solid backing must each be at least 0.2 mm thick.')
         if face.thickness_mm > g.face_recess_depth_mm:
             issues.append('Face is thicker than the base recess.')
-        if not self.project.texts and not self.project.logo.path:
+        images = [e for e in [self.project.logo, *self.project.elements] if e.path and e.enabled]
+        for element in images:
+            if not Path(element.path).exists():
+                issues.append(f'Image is missing: {element.name}. Reload it before exporting.')
+            if element.width_mm < 4:
+                warnings.append(f'{element.name} is under 4 mm wide; verify fine details in the slicer.')
+        if not any(t.enabled and t.text.strip() for t in self.project.texts) and not images:
             warnings.append('No editable text or logo yet. Export will produce a blank face. Photos are references only.')
         else:
-            ok.append('Text and logo will become flush front-layer inlays, with a solid backing.')
+            ok.append(f'Text and {len(images)} image(s) will become flush front-layer inlays, with a solid backing.')
         warnings.append('Use matching first-layer / layer heights that divide the front depth. Inspect fine lettering in the slicer before printing.')
 
         text = "CARDFORGE 4D PRINTABILITY REPORT\n\n"
@@ -1491,6 +1696,9 @@ class CardForgeApp(tk.Tk):
         self.logo_opacity.set(self.project.logo.opacity / 2.55)
         self.logo_enabled_var.set(self.project.logo.enabled)
         self.refresh_logo_preview()
+        self.refresh_element_list()
+        self.select_element()
+        self.grayscale_var.set(self.project.editor.grayscale_artwork)
         self.snap_var.set(self.project.editor.snap_mm)
         self.show_nfc_var.set(self.project.editor.show_nfc_guide)
         self.face_thickness.set(self.project.face.thickness_mm)
@@ -1522,6 +1730,7 @@ class CardForgeApp(tk.Tk):
 
     def _sync_edits(self):
         self.apply_logo()
+        self.apply_element()
         self.apply_geometry()
         self.sync_face_fields()
         self.project.editor.snap_mm = float(self.snap_var.get())
@@ -1577,12 +1786,13 @@ class CardForgeApp(tk.Tk):
     def show_help(self):
         messagebox.showinfo('CardForge 4D '+VERSION,
             '1. Start with a blank, business or membership card.\n'
-            '2. Add your logo and text. Drag to position; edit text to choose a font and filament.\n'
-            '3. Set four filament colors. Preview and export the face.\n'
+            '2. Add images and text. Select multiple PNGs for icons and emblems; drag to position.\n'
+            '3. Set four filament colors or use the grayscale preset. Preview and export the face.\n'
             '4. Adjust the NFC pocket and export the base separately, or export the complete assembly.\n'
             '5. Open the 3MF as a model in Bambu Studio. Inspect every layer before printing.\n\n'
             'The face prints artwork-side down with flat front and back. Colors occupy only the front layers.\n'
             'Save a .cardforge project to keep your editable design, fonts and images together.\n\n'
+            'Choose the package name and destination each time you export. Use the numbered tabs to change steps.\n\n'
             'Ctrl+S Save   Ctrl+O Open   Ctrl+Z Undo   Ctrl+Y Redo\n'
             'This preview release still needs a slicer review and physical test print for each design.')
 
@@ -1607,6 +1817,8 @@ def _undoable(method):
 
 for _name in ('load_photo', 'auto_correct', 'use_original', 'apply_manual_corners',
               'delete_text', 'load_logo', 'apply_logo', 'clean_logo_background',
+              'load_elements', 'apply_element', 'remove_element', 'center_element', 'clean_element_background',
+              'toggle_grayscale', 'grayscale_palette',
               'scale_logo', 'run_ocr', 'restore_photo_background', 'finish_logo_selection',
               'pick_filament_color', 'apply_geometry', 'sync_face_fields',
               'new_project', 'open_project', '_import_hueforge_path', 'start_template', 'duplicate_text', 'center_logo'):

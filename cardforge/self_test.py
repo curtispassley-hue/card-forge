@@ -60,11 +60,50 @@ def run():
         assert app.tabs.index(app.tabs.select()) == 1
         app.navigate(-1)
         assert app.tabs.index(app.tabs.select()) == 0
+        # Multiple PNGs use the real file picker action and editable controls.
+        icon = td/'Badge.png'
+        badge = Image.new('RGBA', (100, 100), (0, 0, 0, 0))
+        ImageDraw.Draw(badge).ellipse((10, 10, 90, 90), fill='#D92D20')
+        badge.save(icon)
+        emblem = td/'Emblem.png'
+        badge.save(emblem)
+        with patch('cardforge.gui.filedialog.askopenfilenames', return_value=(str(icon), str(emblem))):
+            app.load_elements()
+        assert len(app.project.elements) == 2
+        app.element_w.set(10)
+        app.element_name.set('My badge')
+        app.apply_element()
+        assert app.project.elements[0].width_mm == 10 and app.project.elements[0].name == 'My badge'
+        app.undo()
+        assert app.project.elements[0].width_mm == 12
+        app.redo()
+        assert app.project.elements[0].width_mm == 10
+        app.grayscale_palette()
+        assert app.project.editor.grayscale_artwork
+        app.undo()
+        assert not app.project.editor.grayscale_artwork
         target = td/'face-output'
+        target.mkdir()
         notices = []
+        # Drive the actual export modal, including destination and package name.
+        def choose_output(name):
+            app.output_name_var.set(name)
+            app.output_dir_var.set(str(target))
+            import tkinter as tk
+            def visit(widget):
+                for child in widget.winfo_children():
+                    if isinstance(child, __import__('tkinter.ttk', fromlist=['Button']).Button) and child.cget('text') == 'Export files':
+                        child.invoke()
+                        return True
+                    if visit(child): return True
+                return False
+            for child in app.winfo_children():
+                if isinstance(child, tk.Toplevel) and visit(child): return
+            errors.append('Export dialog button was not found')
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
              patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
+            app.after(50, lambda: choose_output('SampleFace'))
             app.export_face_files()
             assert app.busy
             ticks = 0
@@ -74,19 +113,22 @@ def run():
                 ticks += 1
                 time.sleep(0.01)
             assert not app.busy and ticks > 1 and notices, (ticks, notices, errors)
-        face_output = next(target.glob('CardForge_Face_*'))
-        assert (face_output/'CardForge_Face.3mf').exists()
-        assert (face_output/'Parts.json').exists()
+        face_output = target/'SampleFace'
+        assert (face_output/'SampleFace_Face.3mf').exists()
+        assert (face_output/'SampleFace_Parts.json').exists()
         assert (face_output/'Aligned_STLs').is_dir()
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
              patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
+            app.after(50, lambda: choose_output('SampleLogo'))
             app.export_logo_stl()
             deadline = time.monotonic() + 30
             while app.busy and time.monotonic() < deadline:
                 app.update()
                 time.sleep(0.01)
-            assert not app.busy and list(target.glob('CardForge_Logo_*/CardForge_Logo.3mf'))
+            assert not app.busy and (target/'SampleLogo'/'SampleLogo_Logo.3mf').exists()
+        portable_images = app.project.save_bundle(td/'images.cardforge')
+        assert len(Project.load_bundle(portable_images, td/'loaded-images').elements) == 2
         # A complete design without a reference photo, through GUI save/open.
         app.start_template('Business card')
         assert app.project.source_image == '' and len(app.project.texts) == 4
@@ -120,4 +162,4 @@ def run():
         assert (scratch_output/'CardForge_NFC_Base.stl').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
+        return {'passed': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
