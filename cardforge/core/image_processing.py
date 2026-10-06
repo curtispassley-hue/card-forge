@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from .fonts import default_font
 from .artwork import render_image_layer
+from .colors import text_color, effective_palette
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -153,10 +154,10 @@ def fit_card_image(im: Image.Image, ratio: float = CARD_RATIO, width_px: int = 1
 
 
 def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float, texts, logo,
-                            elements=None, grayscale=False) -> Image.Image:
+                            elements=None, grayscale=False, project=None) -> Image.Image:
     """Render editable artwork for the canvas, including additional PNG elements."""
     out = base.convert("RGBA")
-    if grayscale:
+    if grayscale and project is None:
         gray = out.convert("L")
         out = Image.merge("RGBA", (gray, gray, gray, out.getchannel("A")))
     draw = ImageDraw.Draw(out)
@@ -172,13 +173,15 @@ def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float
             font = ImageFont.load_default(size=px)
         x = int(round(layer.x_mm * ppm))
         y = int(round(out.height - layer.y_mm * ppm))
-        draw.text((x, y), layer.text, font=font, fill=layer.color, anchor="mm")
+        draw.text((x, y), layer.text, font=font, fill=(text_color(layer, project) if project else layer.color), anchor="mm")
 
     for element in [logo, *(elements or [])]:
         if not element or not getattr(element, "enabled", True) or not element.path or not Path(element.path).exists():
             continue
         try:
-            lg = render_image_layer(element, ppm, out.height/height_mm, grayscale)
+            lg = render_image_layer(element, ppm, out.height/height_mm, grayscale,
+                                    effective_palette(project) if project else None,
+                                    project.hueforge.mapping_palette if project else None)
             target_w, target_h = lg.size
             x = int(round(element.x_mm * ppm - target_w / 2))
             y = int(round(out.height - element.y_mm * ppm - target_h / 2))

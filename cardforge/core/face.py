@@ -11,7 +11,8 @@ from shapely import affinity, constrained_delaunay_triangles, set_precision
 from .geometry import rounded_rect, face_target_dimensions, export_base_stl
 from .image_processing import fit_card_image, hex_to_rgb
 from .fonts import default_font
-from .artwork import render_image_layer
+from .artwork import render_image_layer, render_slot_layer
+from .colors import effective_palette, export_palette, text_color
 import trimesh
 
 
@@ -161,7 +162,7 @@ def artwork_masks(project, include_text=True):
         font = ImageFont.truetype(layer.font_path or default_font(), max(1,round(layer.size_pt*25.4/72*sx)))
         ImageDraw.Draw(mask).text(((layer.x_mm-inset)*sx, (fh-layer.y_mm+inset)*sy),
                                  layer.text,font=font,fill=255,anchor='mm')
-        masks.append((f'Text {i+1} - {layer.text[:32]}', palette_color(layer.color, project.hueforge.palette), np.array(mask)>=128))
+        masks.append((f'Text {i+1} - {layer.text[:32]}', text_color(layer, project), np.array(mask)>=128))
     # The original logo field is kept for old projects; each additional
     # element is cut with the same clipping and palette rules.
     for element_index, logo in enumerate([project.logo, *getattr(project, 'elements', [])]):
@@ -172,19 +173,19 @@ def artwork_masks(project, include_text=True):
         if not np.isfinite([logo.x_mm, logo.y_mm, logo.width_mm, logo.opacity]).all() or not 0.5 <= logo.width_mm <= 256:
             raise ValueError('Image width must be 0.5–256 mm and its position must be a valid number.')
         im = render_image_layer(logo, sx, sy, project.editor.grayscale_artwork)
+        assigned = render_slot_layer(logo, sx, sy, project.editor.grayscale_artwork, project.hueforge.mapping_palette)
         width, height = im.size
         canvas=Image.new('RGBA',(w,h))
         canvas.alpha_composite(im,(round((logo.x_mm-inset)*sx-width/2),round((fh-logo.y_mm+inset)*sy-height/2)))
         pixels=np.array(canvas)
-        alpha=pixels[:,:,3]>=128
-        pal=np.array([hex_to_rgb(c) for c in project.hueforge.palette],dtype=np.int32)
-        indices=np.zeros((h,w),dtype=np.uint8)
-        for start in range(0,h,64):
-            diff=pixels[start:start+64,:,:3].astype(np.int32)[:,:,None,:]-pal
-            indices[start:start+64]=np.argmin((diff*diff).sum(axis=3),axis=2)
+        if not 1 <= logo.alpha_cutoff <= 255: raise ValueError('Edge threshold must be 1–255.')
+        alpha=pixels[:,:,3]>=logo.alpha_cutoff
+        slot_canvas = Image.new('L', (w,h))
+        slot_canvas.paste(assigned, (round((logo.x_mm-inset)*sx-width/2),round((fh-logo.y_mm+inset)*sy-height/2)))
+        indices=np.asarray(slot_canvas)
         prefix = 'Logo' if element_index == 0 else (logo.name or f'Element {element_index}')
-        for i,color in enumerate(project.hueforge.palette):
-            masks.append((f'{prefix} - color {i+1}',color,alpha & (indices==i)))
+        for i,color in enumerate(effective_palette(project)):
+            masks.append((f'{prefix} - color {i+1}',color,alpha & (indices==i+1)))
     return masks, footprint, (w, h), depth, total
 
 
@@ -201,7 +202,7 @@ def face_regions(project, include_text=True):
         covered=covered.union(region)
         regions.append((name,color,region))
     regions.reverse()
-    regions.insert(0,('Background',palette_color(project.face.background_color, project.hueforge.palette),footprint.difference(covered)))
+    regions.insert(0,('Background',project.face.background_color,footprint.difference(covered)))
     return _resolve_contacts(regions, footprint), footprint, depth, total
 
 
@@ -233,7 +234,8 @@ def export_3mf(parts, path, palette=None, assembly_name='CardForge flush face'):
     # Map the four user-selected colors to Bambu's filament slots.  A part
     # index is not a filament index: a face can contain many text/logo parts
     # that intentionally share one of the four colors.
-    slot_by_color = {str(c).upper(): i + 1 for i, c in enumerate(palette or [])}
+    slot_by_color = {}
+    for i, color in enumerate(palette or []): slot_by_color.setdefault(str(color).upper(), i+1)
     material_id = len(parts)+2
     material = ET.SubElement(resources, tag('basematerials'), {'id': str(material_id)})
     for part in parts:
@@ -272,7 +274,7 @@ def export_face(project, output, include_base=False, output_name=None):
     out=_export_folder(output, 'CardForge_Face', output_name)
     stem = _safe_stem(output_name, 'CardForge')
     face_file = out / (f'{stem}_Face.3mf' if output_name else 'CardForge_Face.3mf')
-    export_3mf(parts,face_file, project.hueforge.palette)
+    export_3mf(parts,face_file, export_palette(project))
     stls=out/'Aligned_STLs'
     stls.mkdir(exist_ok=True)
     info=[]
@@ -290,7 +292,7 @@ Open {face_file.name} as a model in Bambu Studio. The face is one assembly with 
 
 The model is already artwork-side down and mirrored correctly. Do not mirror or flip it again. Both exterior faces are flat. Text/logo occupy only the first front layers; Solid backing starts above them. Use a layer height and first layer that divide the front depth (default: two 0.2 mm front layers and two 0.2 mm backing layers). Assign the background and backing the same filament if desired.
 
-Photos are layout references. Editable text, logos and added image elements become inlay geometry. Remove unwanted image backgrounds before export. Transparent/antialiased edges are thresholded; image colors map to the four selected palette colors. Fine features still require a slicer preview and test print.
+Photos are layout references. Editable text, logos and added image elements become inlay geometry. Remove unwanted image backgrounds before export. Transparent/antialiased edges are thresholded; image regions retain their numbered artwork filament assignments. Background is independent: if it uses a fifth distinct color, remap colors to your available spools in the slicer. Fine features still require a slicer preview and test print.
 
 Print the NFC base separately, install the tag and test-fit the face before gluing. No HueForge software is needed.
 '''.replace('{face_file.name}', face_file.name),encoding='utf-8')
@@ -330,7 +332,7 @@ def export_logo(project, output, output_name=None):
     out = _export_folder(output, 'CardForge_Logo', output_name)
     stem = _safe_stem(output_name, 'CardForge')
     logo_file = out / (f'{stem}_Logo.3mf' if output_name else 'CardForge_Logo.3mf')
-    export_3mf(parts, logo_file, project.hueforge.palette, 'CardForge standalone logo')
+    export_3mf(parts, logo_file, export_palette(project), 'CardForge standalone logo')
     stls = out / 'Logo_STLs'
     stls.mkdir(exist_ok=True)
     info = []
@@ -392,7 +394,7 @@ def face_preview(project):
     """
     masks, footprint, size, _, _ = artwork_masks(project)
     fw, fh = face_target_dimensions(project.geometry)
-    background = palette_color(project.face.background_color, project.hueforge.palette)
+    background = project.face.background_color
     im = Image.new('RGB', size, background)
     for _, color, mask in masks:
         im.paste(color, (0, 0, *size), Image.fromarray(mask.astype('uint8')*255))

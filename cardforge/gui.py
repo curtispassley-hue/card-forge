@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .core.colors import effective_palette, DEFAULT_PALETTE, nearest_slot, export_palette
 import json
 import copy
 import queue
@@ -33,7 +34,7 @@ from .core.geometry import export_base_stl, make_face_blank, face_target_dimensi
 from .core.hueforge import import_hueforge_path  # legacy reader for 0.4 projects
 
 
-VERSION = "0.8 Preview"
+VERSION = "0.9 Preview"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
@@ -467,6 +468,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             self.project.logo,
             self.project.elements,
             self.project.editor.grayscale_artwork,
+            project=self.project,
         )
 
     def show_image_on_canvas(self, image, canvas, key):
@@ -567,9 +569,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         self._field(panel, 'Center X (mm)', x)
         self._field(panel, 'Center Y (mm)', y)
         ttk.Label(panel, text='Filament color').pack(anchor='w', pady=(10, 4))
-        palette = self.project.hueforge.palette
-        matched = palette_color(layer.color, palette)
-        slot = tk.IntVar(value=[c.upper() for c in palette].index(matched.upper()))
+        palette = effective_palette(self.project)
+        slot = tk.IntVar(value=layer.filament_slot if layer.filament_slot is not None else nearest_slot(layer.color, self.project.hueforge.mapping_palette))
         row = ttk.Frame(panel); row.pack(fill='x')
         for i, color in enumerate(palette):
             tk.Radiobutton(row, text=str(i+1), value=i, variable=slot, bg=color, selectcolor=color,
@@ -601,6 +602,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             except (ValueError, OSError, tk.TclError) as exc:
                 error.set(str(exc)); return
             layer.text, layer.x_mm, layer.y_mm, layer.size_pt = value.get(), xx, yy, ss
+            layer.filament_slot = slot.get()
             layer.font_path, layer.color, layer.enabled = font_path.get(), palette[slot.get()], enabled.get()
             self._remember()
             if index is None: self.project.texts.append(layer)
@@ -642,16 +644,22 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
 
     def toggle_grayscale(self):
         self.project.editor.grayscale_artwork = self.grayscale_var.get()
+        self.sync_ui_from_project()
         self.refresh_design_preview()
         self.refresh_face_preview()
 
     def grayscale_palette(self):
-        self.project.hueforge.palette = ['#111111', '#666666', '#BBBBBB', '#FFFFFF']
-        self.project.hueforge.filament_names = ['Black', 'Dark gray', 'Light gray', 'White']
-        self.project.editor.grayscale_artwork = True
+        self.project.editor.grayscale_artwork = not self.project.editor.grayscale_artwork
         self.sync_ui_from_project()
         self.refresh_design_preview()
-        self.refresh_face_preview()
+
+    def reset_filaments(self):
+        if self.busy: return
+        self._remember()
+        self.project.hueforge.palette = list(DEFAULT_PALETTE)
+        self.project.editor.grayscale_artwork = False
+        self.sync_ui_from_project()
+        self.refresh_design_preview()
 
     def apply_logo(self):
         values = [float(v.get()) for v in (self.logo_x, self.logo_y, self.logo_w, self.logo_opacity)]
@@ -788,15 +796,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
     def pick_filament_color(self, idx):
         c = colorchooser.askcolor(initialcolor=self.project.hueforge.palette[idx])
         if c[1]:
-            previous = self.project.hueforge.palette[idx].upper()
-            for layer in self.project.texts:
-                if layer.color.upper() == previous:
-                    layer.color = c[1].upper()
-            for layer in [self.project.logo, *self.project.elements]:
-                if layer.tint_color.upper() == previous:
-                    layer.tint_color = c[1].upper()
-            if self.project.face.background_color.upper() == previous:
-                self.project.face.background_color = c[1].upper()
+            # Keep assignments and background intact; editing a swatch returns to color mode.
+            self.project.editor.grayscale_artwork = False
             self.project.hueforge.palette[idx] = c[1].upper()
             self.sync_ui_from_project()
             self.refresh_face_preview()
@@ -814,7 +815,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         color = colorchooser.askcolor(initialcolor=self.project.face.background_color)[1]
         if color:
             self._remember()
-            self.project.face.background_color = color
+            self.project.face.background_color = color.upper()
+            self.sync_ui_from_project()
             self.refresh_face_preview()
 
 
@@ -1112,6 +1114,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         else:
             ok.append("Face insert thickness is plausible for a thin face-down print.")
 
+        if len(set(c.upper() for c in export_palette(self.project))) > 4:
+            warnings.append('Background is a fifth distinct design color. Remap or share a color for a four-spool print setup; check actual used parts in the slicer.')
         if len(h.palette) != 4 or len(h.filament_names) != 4:
             issues.append("Exactly four filament slots are required.")
         else:
@@ -1234,7 +1238,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         messagebox.showinfo('CardForge 4D '+VERSION,
             '1. Start with a blank, business or membership card.\n'
             '2. Add images and text. Select a layer; edit its dimensions in the inspector or drag its corner handles.\n'
-            '3. Set four filament colors or use the grayscale preset. Preview and export the face.\n'
+            '3. Use Paint & refine image for individual regions. Set artwork colors and an independent background.\n'
+            '4. Grayscale is reversible: choose Restore color to return to your saved palette.\n'
             '4. Adjust the NFC pocket and export the base separately, or export the complete assembly.\n'
             '5. Open the 3MF as a model in Bambu Studio. Inspect every layer before printing.\n\n'
             'The face prints artwork-side down with flat front and back. Colors occupy only the front layers.\n'

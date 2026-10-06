@@ -14,14 +14,14 @@ def main():
     assets.mkdir(exist_ok=True)
     icon_image('app', size=256).save(assets/'CardForge.ico', sizes=[(16,16), (24,24), (32,32), (48,48), (64,64), (128,128), (256,256)])
     (assets/'windows-version.txt').write_text('''VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(0,8,0,0), prodvers=(0,8,0,0), mask=0x3f, flags=2, OS=0x40004, fileType=1, subtype=0, date=(0,0)),
+  ffi=FixedFileInfo(filevers=(0,9,0,0), prodvers=(0,9,0,0), mask=0x3f, flags=2, OS=0x40004, fileType=1, subtype=0, date=(0,0)),
   kids=[StringFileInfo([StringTable('040904B0', [
     StringStruct('FileDescription', 'CardForge 4D Studio'),
-    StringStruct('FileVersion', '0.8.0 Preview'),
+    StringStruct('FileVersion', '0.9.0 Preview'),
     StringStruct('InternalName', 'CardForge4D'),
     StringStruct('OriginalFilename', 'CardForge4D.exe'),
     StringStruct('ProductName', 'CardForge 4D'),
-    StringStruct('ProductVersion', '0.8.0 Preview')
+    StringStruct('ProductVersion', '0.9.0 Preview')
   ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]
 )''', encoding='utf-8')
     notices = assets/'notices'

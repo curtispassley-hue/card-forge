@@ -125,6 +125,38 @@ def run():
         assert app.project.editor.grayscale_artwork
         app.undo()
         assert not app.project.editor.grayscale_artwork
+        # The workshop edits a copy until Apply and exports numbered paint assignments.
+        app.select_layer('element', 0)
+        previous_path = app.project.elements[0].path
+        app.open_image_workshop()
+        workshop = app.image_workshop
+        app.update()
+        workshop.editor.select_region((50,50),0)
+        workshop.editor.fill(slot=4)
+        workshop.cutoff.set(90)
+        workshop.apply()
+        painted_path = app.project.elements[0].path
+        assert painted_path != previous_path and Path(app.project.elements[0].paint_slots_path).exists()
+        assert app.project.elements[0].alpha_cutoff == 90
+        app.undo(); assert app.project.elements[0].path == previous_path
+        app.redo(); assert app.project.elements[0].path == painted_path
+        app.open_image_workshop()
+        workshop = app.image_workshop
+        workshop.reset_image(); workshop.cancel()
+        assert app.project.elements[0].path == painted_path
+        saved_palette = list(app.project.hueforge.palette)
+        saved_background = app.project.face.background_color
+        app.grayscale_palette()
+        assert app.mode_button.cget('text') == 'Restore color'
+        assert app.project.hueforge.palette == saved_palette
+        app.grayscale_palette()
+        assert not app.project.editor.grayscale_artwork
+        assert app.project.hueforge.palette == saved_palette
+        with patch('cardforge.gui.colorchooser.askcolor', return_value=((0,170,255),'#00AAFF')):
+            app.pick_filament_color(1)
+        assert app.project.hueforge.palette[1] == '#00AAFF'
+        assert app.project.face.background_color == saved_background
+        app.undo(); assert app.project.hueforge.palette == saved_palette
         target = td/'face-output'
         target.mkdir()
         notices = []
@@ -204,4 +236,4 @@ def run():
         assert (scratch_output/'CardForge_NFC_Base.stl').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

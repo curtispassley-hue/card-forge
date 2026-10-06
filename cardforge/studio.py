@@ -13,6 +13,7 @@ from .core.face import face_preview
 from .core.logo import remove_logo_background
 from .core.templates import TEMPLATES
 from .core.fonts import default_font
+from .core.colors import effective_palette
 
 
 class StudioWorkspace:
@@ -76,7 +77,7 @@ class StudioWorkspace:
         header = tk.Frame(self, bg='#132439', padx=18, pady=13)
         header.pack(fill='x')
         tk.Label(header, text='CARDFORGE', bg='#132439', fg='white', font=('Segoe UI', 19, 'bold')).pack(side='left')
-        tk.Label(header, text='STUDIO  /  0.8 PREVIEW', bg='#132439', fg='#8bb7c3', font=('Segoe UI', 9, 'bold')).pack(side='left', padx=18)
+        tk.Label(header, text='STUDIO  /  0.9 PREVIEW', bg='#132439', fg='#8bb7c3', font=('Segoe UI', 9, 'bold')).pack(side='left', padx=18)
         self._button(header, 'Export card', self.export_assembly, 'download', 'Accent.TButton').pack(side='right', padx=(8, 0))
         self._button(header, 'Save project', self.save_project, 'save').pack(side='right', padx=(8, 0))
         self._button(header, 'Open', self.open_project, 'folder').pack(side='right')
@@ -152,8 +153,11 @@ class StudioWorkspace:
             b = tk.Button(palette, text=str(i+1), width=8, relief='flat', bd=0, padx=5, pady=6,
                           command=lambda index=i: self.pick_filament_color(index))
             b.pack(side='left', padx=(0, 5)); self.color_buttons.append(b)
-        self._button(palette, 'Background', self.pick_face_background, 'card').pack(side='left', padx=(6, 4))
-        self._button(palette, 'Grayscale', self.grayscale_palette, 'layers').pack(side='left')
+        self.background_button = tk.Button(palette, text='5  Background', relief='flat', bd=0, padx=8, pady=6, command=self.pick_face_background)
+        self.background_button.pack(side='left', padx=(6, 8))
+        self.mode_button = self._button(palette, 'Grayscale', self.grayscale_palette)
+        self.mode_button.pack(side='left')
+        self._button(palette, 'Reset colors', self.reset_filaments).pack(side='left', padx=4)
         self._button(palette, 'Print checks', lambda: self.show_tool('checks'), 'check').pack(side='right')
         self._button(palette, 'Face only', self.export_face_files, 'download').pack(side='right', padx=6)
         self.progress = ttk.Progressbar(self, mode='indeterminate'); self.progress.pack(fill='x', padx=18)
@@ -219,6 +223,7 @@ class StudioWorkspace:
         ttk.Separator(self.image_inspector).pack(fill='x', pady=10)
         ttk.Label(self.image_inspector, text='IMAGE CLEANUP', style='Step.TLabel').pack(anchor='w', pady=(0, 6))
         self._field(self.image_inspector, 'Tolerance', self.bg_tolerance)
+        self._button(self.image_inspector, 'Paint & refine image', self.open_image_workshop, 'sparkle', 'Accent.TButton').pack(fill='x', pady=4)
         self._button(self.image_inspector, 'Remove background', self.clean_selected_background, 'sparkle').pack(fill='x', pady=4)
         self._button(self.image_inspector, 'Trim transparent edges', self.trim_selected, 'crop').pack(fill='x', pady=4)
         ttk.Checkbutton(self.image_inspector, text='Grayscale this image', variable=self.image_gray_var,
@@ -440,7 +445,17 @@ class StudioWorkspace:
         self._edit_image(lambda e: setattr(e, axis, not getattr(e, axis)))
 
     def tint_selected(self, slot):
-        self._edit_image(lambda e: setattr(e, 'tint_color', '' if slot is None else self.project.hueforge.palette[slot]))
+        def change(layer):
+            layer.filament_slot = slot
+            layer.tint_color = ''
+        self._edit_image(change)
+
+    def open_image_workshop(self):
+        if self.busy or not self.commit_selected(): return
+        layer = self.selected_layer()
+        if layer is None or self.selected[0] == 'text': return
+        from .paint import ImageWorkshop
+        self.image_workshop = ImageWorkshop(self, layer)
 
     def center_selected(self):
         layer = self.selected_layer()
@@ -453,6 +468,7 @@ class StudioWorkspace:
         def clean(layer):
             out = self.tempdir / (uuid.uuid4().hex+'_clean.png')
             with Image.open(layer.path) as im: remove_logo_background(im, float(self.bg_tolerance.get())).save(out)
+            if not layer.edit_source_path: layer.edit_source_path = layer.path
             layer.path = str(out)
         self._edit_image(clean)
 
@@ -465,6 +481,12 @@ class StudioWorkspace:
             width, height = image_size_mm(layer)
             out = self.tempdir / (uuid.uuid4().hex+'_trim.png')
             im.crop(bounds).save(out)
+            for attr in ('paint_slots_path', 'edit_source_path'):
+                path = getattr(layer, attr)
+                if path:
+                    dest = self.tempdir / (uuid.uuid4().hex+'_'+attr+'.png')
+                    with Image.open(path) as raw: raw.crop(bounds).save(dest)
+                    setattr(layer, attr, str(dest))
             # Keep width; explicit height follows the new pixel aspect ratio.
             layer.height_mm = width*(bounds[3]-bounds[1])/(bounds[2]-bounds[0])
             layer.path = str(out)
@@ -561,11 +583,15 @@ class StudioWorkspace:
         self.grayscale_var.set(self.project.editor.grayscale_artwork)
         self.face_thickness.set(self.project.face.thickness_mm)
         self.transparent_cap.set(self.project.face.front_depth_mm)
-        for i, color in enumerate(h.palette):
+        for i, color in enumerate(effective_palette(self.project)):
             self.filament_name_vars[i].set(h.filament_names[i])
             ink = 'white' if sum(int(color[k:k+2], 16) for k in (1, 3, 5)) < 400 else '#203149'
             self.color_buttons[i].configure(text=f'{i+1}   {color}', bg=color, fg=ink, activebackground=color)
             self.tint_buttons[i].configure(bg=color, fg=ink)
+        bg = self.project.face.background_color
+        ink = 'white' if sum(int(bg[k:k+2],16) for k in (1,3,5)) < 400 else '#203149'
+        self.background_button.configure(bg=bg, fg=ink, activebackground=bg)
+        self.mode_button.configure(text='Restore color' if self.project.editor.grayscale_artwork else 'Grayscale')
         self.refresh_layers(); self.sync_inspector(); self.refresh_ocr_status(); self.run_checks()
 
     def _schedule_canvas(self, event=None):

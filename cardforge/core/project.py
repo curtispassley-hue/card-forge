@@ -18,6 +18,7 @@ class TextLayer:
     enabled: bool = True
     ocr_confidence: float = 0.0
     source_box_px: list[list[float]] = field(default_factory=list)
+    filament_slot: int | None = None
 
 
 @dataclass
@@ -37,6 +38,10 @@ class LogoLayer:
     flip_y: bool = False
     grayscale: bool = False
     tint_color: str = ""
+    filament_slot: int | None = None
+    paint_slots_path: str = ""
+    edit_source_path: str = ""
+    alpha_cutoff: int = 128
 
 
 @dataclass
@@ -67,6 +72,7 @@ class HueForgeSettings:
     transparent_cap_mm: float = 0.20
     palette: list[str] = field(default_factory=lambda: ["#111111", "#FFFFFF", "#D92D20", "#F4C430"])
     filament_names: list[str] = field(default_factory=lambda: ["Black", "White", "Red", "Gold"])
+    mapping_palette: list[str] = field(default_factory=lambda: ["#111111", "#FFFFFF", "#D92D20", "#F4C430"])
 
 
 @dataclass
@@ -87,7 +93,7 @@ class FaceSettings:
 
 @dataclass
 class Project:
-    format_version: str = "0.8.0"
+    format_version: str = "0.9.0"
     name: str = "Untitled Card"
     source_image: str = ""
     corrected_image: str = ""
@@ -115,7 +121,9 @@ class Project:
         data = copy.deepcopy(data)
         data["geometry"] = GeometrySettings(**data.get("geometry", {}))
         data["nfc"] = NFCSettings(**data.get("nfc", {}))
-        data["hueforge"] = HueForgeSettings(**data.get("hueforge", {}))
+        colors = data.get('hueforge', {})
+        colors.setdefault('mapping_palette', list(colors.get('palette', HueForgeSettings().palette)))
+        data["hueforge"] = HueForgeSettings(**colors)
         data["editor"] = EditorSettings(**data.get("editor", {}))
         data["face"] = FaceSettings(**data.get("face", {}))
         data["texts"] = [TextLayer(**x) for x in data.get("texts", [])]
@@ -166,8 +174,12 @@ class Project:
         for key in ("source_image", "corrected_image", "cleaned_image"):
             data[key] = bundle_asset(data.get(key, ""), key)
         data["logo"]["path"] = bundle_asset(data.get("logo", {}).get("path", ""), "logo")
+        for key in ('paint_slots_path', 'edit_source_path'):
+            data['logo'][key] = bundle_asset(data['logo'].get(key, ''), 'logo_'+key)
         for i, element in enumerate(data.get("elements", [])):
             element["path"] = bundle_asset(element.get("path", ""), f"element_{i}")
+            for key in ('paint_slots_path', 'edit_source_path'):
+                element[key] = bundle_asset(element.get(key, ''), f'element_{i}_{key}')
         for i, layer in enumerate(data["texts"]):
             layer["font_path"] = bundle_asset(layer.get("font_path", ""), f"font_{i}")
         imported = Path(self.hueforge_import_path) if self.hueforge_import_path else None
@@ -225,6 +237,10 @@ class Project:
             layer["font_path"] = resolve(layer.get("font_path", ""))
         if "logo" in data:
             data["logo"]["path"] = resolve(data["logo"].get("path", ""))
+            for key in ('paint_slots_path', 'edit_source_path'):
+                data['logo'][key] = resolve(data['logo'].get(key, ''))
         for element in data.get("elements", []):
             element["path"] = resolve(element.get("path", ""))
+            for key in ('paint_slots_path', 'edit_source_path'):
+                element[key] = resolve(element.get(key, ''))
         return cls.from_dict(data)
