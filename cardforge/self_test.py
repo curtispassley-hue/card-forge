@@ -30,10 +30,20 @@ def run():
         recognized = ' '.join(x.text for x in lines).upper()
         assert 'CARDFORGE' in recognized and '123' in recognized, recognized
         app = CardForgeApp()
-        app.withdraw()
         errors = []
         app.report_callback_exception = lambda *args: errors.append(str(args))
+        app.geometry('1180x760')
         app.update()
+        assert app.design_canvas.winfo_width() >= 400
+        # Buttons must retain visible labels at the minimum supported size.
+        from tkinter import ttk
+        def check_layout(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Button) and child.winfo_ismapped():
+                    assert child.winfo_width()+5 >= child.winfo_reqwidth(), child.cget('text')
+                check_layout(child)
+        check_layout(app)
+        app.withdraw()
         app.run_checks()
         # Exercise real editor controls and keep the event loop alive during export.
         from unittest.mock import patch
@@ -56,10 +66,7 @@ def run():
         assert cleaned != str(logo)
         app.undo()
         assert app.project.logo.path == str(logo)
-        app.navigate(1)
-        assert app.tabs.index(app.tabs.select()) == 1
-        app.navigate(-1)
-        assert app.tabs.index(app.tabs.select()) == 0
+        assert not hasattr(app, 'tabs')
         # Multiple PNGs use the real file picker action and editable controls.
         icon = td/'Badge.png'
         badge = Image.new('RGBA', (100, 100), (0, 0, 0, 0))
@@ -70,14 +77,50 @@ def run():
         with patch('cardforge.gui.filedialog.askopenfilenames', return_value=(str(icon), str(emblem))):
             app.load_elements()
         assert len(app.project.elements) == 2
-        app.element_w.set(10)
-        app.element_name.set('My badge')
-        app.apply_element()
+        app.inspector_vars['width'].set(10)
+        app.inspector_vars['name'].set('My badge')
+        assert app.commit_selected('width')
         assert app.project.elements[0].width_mm == 10 and app.project.elements[0].name == 'My badge'
         app.undo()
-        assert app.project.elements[0].width_mm == 12
+        assert app.project.elements[0].width_mm == 18
         app.redo()
         assert app.project.elements[0].width_mm == 10
+        app.rotate_selected(90)
+        assert app.project.elements[0].rotation_deg == 90
+        app.undo()
+        assert app.project.elements[0].rotation_deg == 0
+        app.flip_selected('flip_x')
+        assert app.project.elements[0].flip_x
+        app.aspect_var.set(False)
+        app.commit_selected('lock')
+        app.inspector_vars['height'].set(6)
+        assert app.commit_selected('height')
+        assert app.project.elements[0].height_mm == 6
+        app.duplicate_selected()
+        assert len(app.project.elements) == 3
+        app.reorder_selected(-1)
+        assert app.selected == ('element', 1)
+        app.delete_selected()
+        assert len(app.project.elements) == 2
+        app.undo()
+        assert len(app.project.elements) == 3
+        app.select_layer('element', 1)
+        app.delete_selected()
+        app.select_layer('element', 0)
+        # Resize through the same canvas handlers as the corner handles.
+        from types import SimpleNamespace
+        app.refresh_design_preview()
+        hx, hy = app.resize_handles[2]
+        origin = app.card_mm_to_canvas(app.project.elements[0].x_mm, app.project.elements[0].y_mm)
+        app.design_press(SimpleNamespace(x=hx, y=hy))
+        app.design_drag(SimpleNamespace(x=origin[0]+(hx-origin[0])*1.5, y=origin[1]+(hy-origin[1])*1.5))
+        app.design_release(SimpleNamespace(x=hx, y=hy))
+        assert app.project.elements[0].width_mm > 14
+        app.undo()
+        assert abs(app.project.elements[0].width_mm-10) < .01
+        app.print_view_var.set(True)
+        app.refresh_design_preview()
+        app.print_view_var.set(False)
         app.grayscale_palette()
         assert app.project.editor.grayscale_artwork
         app.undo()
@@ -141,9 +184,9 @@ def run():
         with patch('cardforge.gui.filedialog.askopenfilename', return_value=str(portable)):
             app.open_project()
         assert len(app.project.texts) == 4 and not app.project.source_image
-        app.text_list.selection_set(0)
+        app.select_layer('text', 0)
         app.refresh_design_preview()
-        assert app.text_list.curselection() == (0,)
+        assert app.selected == ('text', 0)
         app.duplicate_text()
         assert len(app.project.texts) == 5
         app.undo()
@@ -154,12 +197,11 @@ def run():
         # reports a dialog as not viewable even though it was created and owns
         # the input grab; inspect the actual child window instead.
         import tkinter as tk
-        modals = [child for child in app.winfo_children() if isinstance(child, tk.Toplevel)]
-        assert modals and modals[0].grab_current() is not None
-        modal = modals[0]
+        modal = app.grab_current()
+        assert isinstance(modal, tk.Toplevel)
         modal.destroy()
         scratch_output = export_face(app.project, td/'scratch-export', include_base=True)
         assert (scratch_output/'CardForge_NFC_Base.stl').exists()
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'step_navigation': True, 'responsive_face_export': True}
+        return {'passed': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

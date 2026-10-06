@@ -10,7 +10,33 @@ def icon_image(name, color='#334155', size=20):
         d.line([(round(x*scale), round(y*scale)) for x, y in points], fill=color, width=round(width*scale), joint='curve')
     def rect(box, radius=2):
         d.rounded_rectangle(tuple(round(n*scale) for n in box), radius=radius*scale, outline=color, width=7)
-    if name in ('image', 'card'):
+    if name == 'app':
+        d.rounded_rectangle((0, 0, 96, 96), radius=22, fill='#132439')
+        d.rounded_rectangle((16, 22, 79, 77), radius=8, fill='#087f8c')
+        d.rounded_rectangle((23, 17, 84, 67), radius=8, fill='#dff5f3')
+        d.rounded_rectangle((31, 28, 48, 48), radius=4, fill='#087f8c')
+        d.line([(56, 32), (74, 32)], fill='#132439', width=5)
+        d.line([(56, 42), (70, 42)], fill='#132439', width=5)
+        d.line([(32, 57), (74, 57)], fill='#087f8c', width=4)
+    elif name == 'settings':
+        for y, x in [(6, 8), (12, 16), (18, 10)]:
+            line([(3, y), (21, y)])
+            d.ellipse(((x-2)*scale, (y-2)*scale, (x+2)*scale, (y+2)*scale), fill=color)
+    elif name == 'center':
+        rect((7, 7, 17, 17), 1)
+        line([(12, 2), (12, 6)]); line([(12, 18), (12, 22)])
+        line([(2, 12), (6, 12)]); line([(18, 12), (22, 12)])
+    elif name == 'flip':
+        line([(12, 3), (12, 21)], 1)
+        line([(8, 6), (3, 18), (8, 18), (8, 6)])
+        line([(16, 6), (21, 18), (16, 18), (16, 6)])
+    elif name == 'rotate':
+        d.arc((4*scale, 4*scale, 20*scale, 20*scale), 25, 300, fill=color, width=7)
+        line([(18, 3), (18, 8), (13, 7)])
+    elif name in ('up', 'down'):
+        pts = [(6, 13), (12, 7), (18, 13)]
+        line([(x, 24-y if name == 'down' else y) for x, y in pts])
+    elif name in ('image', 'card'):
         rect((3, 5, 21, 19))
         if name == 'image':
             line([(4, 17), (9, 11), (13, 15), (16, 12), (20, 17)])

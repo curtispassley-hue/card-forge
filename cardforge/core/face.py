@@ -11,6 +11,7 @@ from shapely import affinity, constrained_delaunay_triangles, set_precision
 from .geometry import rounded_rect, face_target_dimensions, export_base_stl
 from .image_processing import fit_card_image, hex_to_rgb
 from .fonts import default_font
+from .artwork import render_image_layer
 import trimesh
 
 
@@ -170,20 +171,12 @@ def artwork_masks(project, include_text=True):
             raise ValueError(f'Image element was not found: {logo.path}')
         if not np.isfinite([logo.x_mm, logo.y_mm, logo.width_mm, logo.opacity]).all() or not 0.5 <= logo.width_mm <= 256:
             raise ValueError('Image width must be 0.5–256 mm and its position must be a valid number.')
-        with Image.open(logo.path) as raw:
-            im=raw.convert('RGBA')
-        if project.editor.grayscale_artwork:
-            gray = im.convert('L')
-            im = Image.merge('RGBA', (gray, gray, gray, im.getchannel('A')))
-        width=max(1,round(logo.width_mm*sx))
-        height=max(1,round(im.height*width/im.width))
-        if width*height > 20_000_000:
-            raise ValueError('Image element is too large.')
-        im=im.resize((width,height),Image.Resampling.LANCZOS)
+        im = render_image_layer(logo, sx, sy, project.editor.grayscale_artwork)
+        width, height = im.size
         canvas=Image.new('RGBA',(w,h))
         canvas.alpha_composite(im,(round((logo.x_mm-inset)*sx-width/2),round((fh-logo.y_mm+inset)*sy-height/2)))
         pixels=np.array(canvas)
-        alpha=pixels[:,:,3].astype(float)*logo.opacity/255>=128
+        alpha=pixels[:,:,3]>=128
         pal=np.array([hex_to_rgb(c) for c in project.hueforge.palette],dtype=np.int32)
         indices=np.zeros((h,w),dtype=np.uint8)
         for start in range(0,h,64):

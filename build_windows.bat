@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title CardForge 4D 0.6 Windows Builder
+title CardForge 4D 0.8 Studio Windows Builder
 
 echo ==============================================
-echo CardForge 4D 0.6 - build standalone Windows folder app
+echo CardForge 4D 0.8 Studio - build standalone Windows folder app
 echo ==============================================
 
 echo Checking Python...

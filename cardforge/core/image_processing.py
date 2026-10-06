@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from .fonts import default_font
+from .artwork import render_image_layer
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -177,16 +178,8 @@ def compose_editable_layers(base: Image.Image, width_mm: float, height_mm: float
         if not element or not getattr(element, "enabled", True) or not element.path or not Path(element.path).exists():
             continue
         try:
-            lg = Image.open(element.path).convert("RGBA")
-            if grayscale:
-                gray = lg.convert("L")
-                lg = Image.merge("RGBA", (gray, gray, gray, lg.getchannel("A")))
-            target_w = max(8, int(round(element.width_mm * ppm)))
-            target_h = max(8, int(round(lg.height * target_w / lg.width)))
-            lg = lg.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            if element.opacity < 255:
-                alpha = lg.getchannel("A").point(lambda p: int(p * element.opacity / 255))
-                lg.putalpha(alpha)
+            lg = render_image_layer(element, ppm, out.height/height_mm, grayscale)
+            target_w, target_h = lg.size
             x = int(round(element.x_mm * ppm - target_w / 2))
             y = int(round(out.height - element.y_mm * ppm - target_h / 2))
             out.alpha_composite(lg, (x, y))

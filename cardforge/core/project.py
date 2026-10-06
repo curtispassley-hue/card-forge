@@ -30,6 +30,13 @@ class LogoLayer:
     opacity: int = 255
     enabled: bool = True
     source_rect_px: list[list[float]] = field(default_factory=list)
+    height_mm: float | None = None
+    lock_aspect: bool = True
+    rotation_deg: float = 0.0
+    flip_x: bool = False
+    flip_y: bool = False
+    grayscale: bool = False
+    tint_color: str = ""
 
 
 @dataclass
@@ -80,7 +87,7 @@ class FaceSettings:
 
 @dataclass
 class Project:
-    format_version: str = "0.7.0"
+    format_version: str = "0.8.0"
     name: str = "Untitled Card"
     source_image: str = ""
     corrected_image: str = ""

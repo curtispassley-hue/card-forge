@@ -1,11 +1,12 @@
-CardForge 4D 0.6 Alpha
+CardForge 4D 0.8 Studio Preview
 
 The Windows workflow runs source tests, then builds and tests the extracted
 folder application. It also runs Microsoft Defender against the app when the
 runner provides Defender and records the result in defender-scan.json.
 
 Tests cover direct face solids, named multipart 3MF output, flat exterior
-faces, four-color mapping, 30 bundled fonts, GUI controls, responsive export,
+faces, image transformations, canvas resizing, single-workspace controls,
+four-color mapping, 30 bundled fonts, responsive export,
 offline OCR, geometry and portable projects.
 
 Not validated: physical printing on a Bambu A1, NFC radio performance after

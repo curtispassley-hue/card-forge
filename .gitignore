@@ -10,3 +10,6 @@ release/
 # build script so the source repository stays small. Release builds bundle
 # the full 30-font library inside the Windows app.
 cardforge/assets/fonts/
+cardforge/assets/notices/
+cardforge/assets/CardForge.ico
+cardforge/assets/windows-version.txt
