@@ -101,6 +101,26 @@ class ProductTests(unittest.TestCase):
         p.product.body_color='red'
         with self.assertRaisesRegex(ValueError,'RRGGBB'): validate_product(p)
 
+    def test_mesh_preview_preserves_readable_complete_front_artwork(self):
+        from cardforge.product_ui import mesh_preview
+        from cardforge.core.face import face_preview
+        from PIL import Image
+        p=create_template('Desktop lightbox');parts,_=build_product(p)
+        rendered=np.array(mesh_preview(parts,600,400,yaw=0,pitch=0,face_down=True))
+        # At this aspect ratio the 150x100 shell occupies 510x340 pixels.
+        # Compare only the inset face; discard the black outer shell rim.
+        x0,y0=45,30
+        fw=p.geometry.card_width_mm-2*(p.geometry.face_border_mm+p.geometry.face_clearance_mm)
+        fh=p.geometry.card_height_mm-2*(p.geometry.face_border_mm+p.geometry.face_clearance_mm)
+        inset=round((p.geometry.face_border_mm+p.geometry.face_clearance_mm)*3.4)
+        face=rendered[y0+inset:370-inset,x0+inset:555-inset]
+        expected=np.array(face_preview(p).resize((face.shape[1],face.shape[0]),Image.Resampling.NEAREST))
+        # Center excludes the rounded rim; a mirrored or partly hidden text
+        # yields low agreement. This catches the former triangle painter bug.
+        crop=(slice(face.shape[0]//3,face.shape[0]*2//3),slice(face.shape[1]//5,face.shape[1]*4//5))
+        actual=(face[crop]<80).all(2);wanted=(expected[crop]<80).all(2)
+        self.assertGreater((actual&wanted).sum()/max(1,(actual|wanted).sum()),.9)
+
     def test_old_project_defaults_to_card_and_missing_assets_do_not_save(self):
         old=Project.from_dict({'format_version':'0.4.0'})
         self.assertEqual(old.product.kind,'nfc_card')

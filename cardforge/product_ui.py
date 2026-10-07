@@ -7,35 +7,59 @@ import numpy as np
 from .core.products import KINDS, validate_product, build_product, load_model, model_surfaces, choose_surface
 
 
-def draw_meshes(canvas, parts, yaw=30, pitch=55, highlighted=None):
-    from PIL import Image, ImageDraw, ImageColor, ImageTk
-    canvas.delete('all')
-    if not parts: return
+def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_down=False):
+    """Software depth buffer: rear triangles never paint over nearer artwork."""
+    from PIL import Image, ImageColor
+    if not parts: return Image.new('RGB',(width,height),'#dce4ed')
+    ratio=min(1,800/width,600/height)
+    rw,rh=max(100,round(width*ratio)),max(100,round(height*ratio))
     yaw,pitch=map(math.radians,(yaw,pitch))
     rz=np.array([[math.cos(yaw),-math.sin(yaw),0],[math.sin(yaw),math.cos(yaw),0],[0,0,1]])
     rx=np.array([[1,0,0],[0,math.cos(pitch),-math.sin(pitch)],[0,math.sin(pitch),math.cos(pitch)]])
-    rotation=rx@rz
+    rotation=rx@rz@(np.diag([-1.,1.,-1.]) if face_down else np.eye(3))
     points=np.vstack([p['mesh'].vertices for p in parts]);center=(points.min(0)+points.max(0))/2
     projected=(points-center)@rotation.T
     bounds=np.array([projected.min(0),projected.max(0)])
-    width,height=max(100,canvas.winfo_width()),max(100,canvas.winfo_height())
-    scale=min((width-60)/max(1,bounds[1,0]-bounds[0,0]),(height-60)/max(1,bounds[1,1]-bounds[0,1]))
-    coordinates,depths,colors=[],[],[]
+    scale=min((rw-60*ratio)/max(1,bounds[1,0]-bounds[0,0]),(rh-60*ratio)/max(1,bounds[1,1]-bounds[0,1]))
+    pixels=np.empty((rh,rw,3),dtype='uint8');pixels[:]=ImageColor.getrgb('#dce4ed')
+    depth=np.full((rh,rw),-np.inf)
     for part in parts:
-        mesh=part['mesh'];xyz=(mesh.vertices-center)@rotation.T;tris=xyz[mesh.faces]
-        xy=tris[:,:,:2].copy();xy[:,:,0]=width/2+xy[:,:,0]*scale;xy[:,:,1]=height/2-xy[:,:,1]*scale
-        rgb=np.tile(ImageColor.getrgb(part['color'])[:3],(len(mesh.faces),1)).astype(float)
-        if highlighted is not None:
-            rgb[list(highlighted)]=ImageColor.getrgb('#F4C430')
+        mesh=part['mesh'];xyz=(mesh.vertices-center)@rotation.T
         normals=mesh.face_normals@rotation.T
-        lighting=.65+.35*np.maximum(0,-normals[:,2])
-        rgb=np.clip(rgb*lighting[:,None],0,255).astype('uint8')
-        coordinates.append(xy);depths.append(tris[:,:,2].mean(1));colors.append(rgb)
-    coordinates=np.concatenate(coordinates);depths=np.concatenate(depths);colors=np.concatenate(colors)
-    image=Image.new('RGB',(width,height),'#dce4ed');draw=ImageDraw.Draw(image)
-    for index in np.argsort(-depths):
-        draw.polygon([tuple(p) for p in coordinates[index]],fill=tuple(int(c) for c in colors[index]))
-    canvas.image_ref=ImageTk.PhotoImage(image);canvas.create_image(0,0,anchor='nw',image=canvas.image_ref)
+        rgb=np.array(ImageColor.getrgb(part['color'])[:3])
+        # Viewer looks along -Z; a proper 180-degree rotation makes the
+        # face-down manufacturing assembly readable from its artwork side.
+        for index in np.flatnonzero(normals[:,2]>1e-9):
+            tri=xyz[mesh.faces[index]].copy()
+            tri[:,0]=rw/2+tri[:,0]*scale;tri[:,1]=rh/2-tri[:,1]*scale
+            x0,y0=np.maximum(0,np.floor(tri[:,:2].min(0)).astype(int))
+            x1,y1=np.minimum([rw-1,rh-1],np.ceil(tri[:,:2].max(0)).astype(int))
+            if x1<x0 or y1<y0: continue
+            a,b,c=tri
+            denominator=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1])
+            if abs(denominator)<1e-10: continue
+            xs=np.arange(x0,x1+1)[None,:]+.5;ys=np.arange(y0,y1+1)[:,None]+.5
+            wa=((b[1]-c[1])*(xs-c[0])+(c[0]-b[0])*(ys-c[1]))/denominator
+            wb=((c[1]-a[1])*(xs-c[0])+(a[0]-c[0])*(ys-c[1]))/denominator
+            wc=1-wa-wb
+            z=wa*a[2]+wb*b[2]+wc*c[2]
+            old=depth[y0:y1+1,x0:x1+1]
+            visible=(wa>=-1e-8)&(wb>=-1e-8)&(wc>=-1e-8)&(z>old)
+            if not visible.any(): continue
+            color=np.array(ImageColor.getrgb('#F4C430')) if highlighted is not None and index in highlighted else rgb
+            shade=.65+.35*normals[index,2]
+            pixels[y0:y1+1,x0:x1+1][visible]=np.clip(color*shade,0,255).astype('uint8')
+            old[visible]=z[visible]
+    return Image.fromarray(pixels).resize((width,height),Image.Resampling.LANCZOS)
+
+
+def draw_meshes(canvas, parts, yaw=30, pitch=55, highlighted=None, face_down=False):
+    from PIL import ImageTk
+    canvas.delete('all')
+    if not parts: return
+    width,height=max(100,canvas.winfo_width()),max(100,canvas.winfo_height())
+    canvas.image_ref=ImageTk.PhotoImage(mesh_preview(parts,width,height,yaw,pitch,highlighted,face_down))
+    canvas.create_image(0,0,anchor='nw',image=canvas.image_ref)
     canvas.create_text(12,12,anchor='nw',text='Assembly preview • drag to rotate',fill='#203149',font=('Segoe UI',10,'bold'))
 
 
@@ -220,12 +244,14 @@ class ProductControls:
         def ready(result):
             self.object_preview_parts=result[0]
             if self.project.product.kind=='nfc_card':
-                base=copy.deepcopy(result[1][0]);base['mesh'].apply_translation([self.project.geometry.card_width_mm+12,0,0]);self.object_preview_parts.append(base)
+                base=copy.deepcopy(result[1][0])
+                base['mesh'].apply_transform(np.diag([-1.,1.,-1.,1.]))
+                base['mesh'].apply_translation([2*self.project.geometry.card_width_mm+12,0,0]);self.object_preview_parts.append(base)
             self.object_preview_var.set(True);self.draw_object_preview()
         self._background('Building assembly preview…',lambda: build_product(snapshot),ready)
 
     def draw_object_preview(self):
-        draw_meshes(self.design_canvas,self.object_preview_parts,self.object_yaw,self.object_pitch)
+        draw_meshes(self.design_canvas,self.object_preview_parts,self.object_yaw,self.object_pitch,face_down=self.project.product.kind!='stl_panel')
 
     def product_report(self):
         p=self.project.product;errors=[]

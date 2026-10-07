@@ -64,7 +64,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self.status = tk.StringVar(value="Start with New project, or add an image or text to the canvas.")
 
         self.object_preview_parts = []
-        self.object_yaw, self.object_pitch = 30, 55
+        self.object_yaw, self.object_pitch = 30, -55
         self.canvas_views = {}
         self.manual_mode = False
         self.manual_points = []
