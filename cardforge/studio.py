@@ -58,6 +58,7 @@ class StudioWorkspace:
         self._resize_handle = None
         self.zoom_var = tk.DoubleVar(value=1)
         self.print_view_var = tk.BooleanVar(value=False)
+        self.object_preview_var = tk.BooleanVar(value=False)
         self.inspector_error = tk.StringVar()
         self.document_var = tk.StringVar(value='Untitled card')
         self.snap_var = tk.DoubleVar(value=.25)
@@ -77,22 +78,25 @@ class StudioWorkspace:
         header = tk.Frame(self, bg='#132439', padx=18, pady=13)
         header.pack(fill='x')
         tk.Label(header, text='CARDFORGE', bg='#132439', fg='white', font=('Segoe UI', 19, 'bold')).pack(side='left')
-        tk.Label(header, text='STUDIO  /  0.9 PREVIEW', bg='#132439', fg='#8bb7c3', font=('Segoe UI', 9, 'bold')).pack(side='left', padx=18)
-        self._button(header, 'Export card', self.export_assembly, 'download', 'Accent.TButton').pack(side='right', padx=(8, 0))
+        tk.Label(header, text='STUDIO  /  1.0 RC', bg='#132439', fg='#8bb7c3', font=('Segoe UI', 9, 'bold')).pack(side='left', padx=18)
+        self._button(header, 'Export object', self.export_assembly, 'download', 'Accent.TButton').pack(side='right', padx=(8, 0))
         self._button(header, 'Save project', self.save_project, 'save').pack(side='right', padx=(8, 0))
         self._button(header, 'Open', self.open_project, 'folder').pack(side='right')
+        self._button(header, 'License', self.license_dialog, 'settings').pack(side='right',padx=6)
 
         toolbar = ttk.Frame(self, padding=(16, 10)); toolbar.pack(fill='x')
-        new = ttk.Menubutton(toolbar, text='New card ▾', style='Secondary.TButton')
+        new = ttk.Menubutton(toolbar, text='New project ▾', style='Secondary.TButton')
         menu = tk.Menu(new, tearoff=False)
         for name in TEMPLATES:
             menu.add_command(label=name, command=lambda n=name: self.start_template(n))
+        menu.add_separator()
+        menu.add_command(label='Artwork on imported STL…', command=self.import_stl_target)
         new.configure(menu=menu); new.pack(side='left', padx=(0, 8))
         self._button(toolbar, 'Add image', self.load_elements, 'image').pack(side='left', padx=(0, 6))
         self._button(toolbar, 'Add text', self.add_text, 'text').pack(side='left')
         self._button(toolbar, 'Undo', self.undo, 'undo').pack(side='left', padx=(20, 6))
         self._button(toolbar, 'Redo', self.redo, 'redo').pack(side='left')
-        self._button(toolbar, 'Card & NFC', lambda: self.show_tool('card'), 'settings').pack(side='right')
+        self._button(toolbar, 'Object settings', self.object_settings, 'settings').pack(side='right')
         self._button(toolbar, 'Photo tools', lambda: self.show_tool('photo'), 'crop').pack(side='right', padx=6)
 
         body = ttk.Frame(self, padding=(14, 0, 14, 0)); body.pack(fill='both', expand=True)
@@ -120,6 +124,7 @@ class StudioWorkspace:
         center = ttk.Frame(body); center.pack(fill='both', expand=True)
         top = ttk.Frame(center, padding=(8, 6)); top.pack(fill='x')
         ttk.Label(top, textvariable=self.document_var, font=('Segoe UI', 12, 'bold')).pack(side='left')
+        self._button(top,'2D / 3D',self.show_object_preview,'layers').pack(side='right',padx=(8,0))
         ttk.Checkbutton(top, text='Print colors', variable=self.print_view_var, command=self.refresh_design_preview).pack(side='right')
         stage = ttk.Frame(center); stage.pack(fill='both', expand=True)
         self.design_canvas = tk.Canvas(stage, bg='#dce4ed', highlightthickness=0, cursor='arrow')
@@ -578,6 +583,8 @@ class StudioWorkspace:
             self.vars['nfc_'+key].set(getattr(n, key))
         self.nfc_preset.set(n.preset_name)
         self._sync_logo_vars()
+        self.object_preview_var.set(False)
+        self.object_preview_parts=[]
         self.snap_var.set(self.project.editor.snap_mm)
         self.show_nfc_var.set(self.project.editor.show_nfc_guide)
         self.grayscale_var.set(self.project.editor.grayscale_artwork)
@@ -605,6 +612,7 @@ class StudioWorkspace:
 
     def refresh_design_preview(self):
         if not hasattr(self, 'design_canvas'): return
+        if self.object_preview_var.get(): self.draw_object_preview();return
         if self._canvas_job is not None:
             self.after_cancel(self._canvas_job); self._canvas_job = None
         im = face_preview(self.project) if self.print_view_var.get() else self.composite_image()
@@ -617,6 +625,18 @@ class StudioWorkspace:
             board = Image.new('RGB', (1600, round(g.card_height_mm*ppm)), '#d3dce6')
             im = im.resize((round(fw*ppm), round(fh*ppm)))
             board.paste(im, ((board.width-im.width)//2, (board.height-im.height)//2)); im = board
+        if self.project.product.kind!='nfc_card':
+            from .core.products import panel_outline
+            from .core.geometry import face_target_dimensions
+            g=self.project.geometry;fw,fh=face_target_dimensions(g)
+            shape=panel_outline(self.project,fw,fh)
+            inset=g.face_border_mm+g.face_clearance_mm
+            sx,sy=im.width/g.card_width_mm,im.height/g.card_height_mm
+            mask=Image.new('L',im.size);draw=ImageDraw.Draw(mask)
+            def coords(ring): return [((x+inset)*sx,(g.card_height_mm-y-inset)*sy) for x,y in ring.coords]
+            draw.polygon(coords(shape.exterior),fill=255)
+            for ring in shape.interiors: draw.polygon(coords(ring),fill=0)
+            board=Image.new('RGB',im.size,'#cbd7e4');board.paste(im,(0,0),mask);im=board
         canvas = self.design_canvas
         cw, ch = max(220, canvas.winfo_width()), max(220, canvas.winfo_height())
         scale = min((cw-72)/im.width, (ch-90)/im.height)*float(self.zoom_var.get())
@@ -660,11 +680,12 @@ class StudioWorkspace:
         return width, height, math.radians(layer.rotation_deg)
 
     def draw_editor_guides(self):
+        if self.object_preview_var.get(): return
         c = self.design_canvas; c.delete('guide')
         self.resize_handles = []
         v = self.canvas_views.get('design')
         if not v: return
-        if self.show_nfc_var.get():
+        if self.show_nfc_var.get() and self.project.product.kind == 'nfc_card':
             x, y = self.card_mm_to_canvas(self.project.nfc.x_mm, self.project.nfc.y_mm)
             r = self.project.nfc.diameter_mm/2/self.project.geometry.card_width_mm*v['view_w']
             c.create_oval(x-r, y-r, x+r, y+r, outline='#778ea5', dash=(5, 4), tags='guide')
@@ -686,6 +707,8 @@ class StudioWorkspace:
 
     def design_press(self, event):
         if self.busy: return
+        if self.object_preview_var.get():
+            self._object_drag=(event.x,event.y,self.object_yaw,self.object_pitch);return
         self.design_canvas.focus_set()
         p = self._event_mm(event)
         if p is None: return
@@ -719,6 +742,10 @@ class StudioWorkspace:
             self.dragging = True
 
     def design_drag(self, event):
+        if self.object_preview_var.get():
+            x,y,yaw,pitch=self._object_drag
+            self.object_yaw=yaw+(event.x-x)*.5;self.object_pitch=pitch+(event.y-y)*.5
+            self.draw_object_preview();return
         p = self._event_mm(event)
         if p is None or self.busy: return
         if self.logo_select_mode and self.logo_select_start:
@@ -747,6 +774,7 @@ class StudioWorkspace:
         self.sync_inspector(); self.refresh_design_preview()
 
     def design_release(self, event):
+        if self.object_preview_var.get(): return
         if self.logo_select_mode and self.logo_select_start:
             p = self._event_mm(event)
             start = self.logo_select_start

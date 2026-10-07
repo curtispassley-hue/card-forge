@@ -142,7 +142,7 @@ def artwork_masks(project, include_text=True):
     total, depth = float(settings.thickness_mm), float(settings.front_depth_mm)
     if not np.isfinite([total, depth]).all() or depth < 0.2 or total-depth < 0.2:
         raise ValueError('Use at least 0.2 mm of front color and 0.2 mm of solid backing.')
-    if total > g.face_recess_depth_mm + 0.001:
+    if project.product.kind == 'nfc_card' and total > g.face_recess_depth_mm + 0.001:
         raise ValueError('Face thickness exceeds the recess depth. Increase the recess or reduce face thickness.')
     fw, fh = face_target_dimensions(g)
     if not np.isfinite([fw, fh, g.corner_radius_mm]).all() or min(fw,fh) <= 0 or max(g.card_width_mm,g.card_height_mm)>256:
@@ -151,7 +151,8 @@ def artwork_masks(project, include_text=True):
     w,h = max(1,round(fw*ppm)),max(1,round(fh*ppm))
     sx,sy = w/fw,h/fh
     inset = g.face_border_mm + g.face_clearance_mm
-    footprint = set_precision(rounded_rect(fw,fh,max(0.25,g.corner_radius_mm-inset)), 0.0001)
+    from .products import panel_outline
+    footprint = set_precision(panel_outline(project, fw, fh), 0.0001)
     masks = []
     for i, layer in enumerate(project.texts if include_text else []):
         if not layer.enabled or not layer.text.strip():
@@ -216,7 +217,9 @@ def build_face(project):
         mesh=prism(poly,0,depth,logo_cleanup=name.startswith('Logo -'))
         if mesh is not None:
             parts.append({'name':name,'color':color,'mesh':mesh,'polygon':poly,'z0':0,'z1':depth})
-    parts.append({'name':'Solid backing','color':regions[0][1],
+    lightbox = project.product.kind == 'lightbox'
+    parts.append({'name':'Translucent diffuser' if lightbox else 'Solid backing',
+                  'color':project.product.diffuser_color if lightbox else regions[0][1],
                   'mesh':prism(footprint,depth,total),'polygon':footprint,'z0':depth,'z1':total})
     expected=footprint.area*total
     if not np.isclose(sum(x['mesh'].volume for x in parts), expected, rtol=1e-7, atol=1e-6):
@@ -290,12 +293,12 @@ def export_face(project, output, include_base=False, output_name=None):
     (out/(f'{stem}_PRINT_README.txt' if output_name else 'PRINT_README.txt')).write_text('''CARDFORGE FLUSH FACE
 Open {face_file.name} as a model in Bambu Studio. The face is one assembly with named parts. Assign filaments in Objects/Parts. If using STLs, select ALL Aligned_STLs files together and answer Yes to loading as a single object with multiple parts. Do not auto-arrange individual parts or drop the backing to the bed.
 
-The model is already artwork-side down and mirrored correctly. Do not mirror or flip it again. Both exterior faces are flat. Text/logo occupy only the first front layers; Solid backing starts above them. Use a layer height and first layer that divide the front depth (default: two 0.2 mm front layers and two 0.2 mm backing layers). Assign the background and backing the same filament if desired.
+The model is already artwork-side down and mirrored correctly. Do not mirror or flip it again. Both exterior faces are flat. Text/logo occupy only the first front layers; backing or translucent diffuser starts above them. Use a layer height and first layer that divide the front depth (default: two 0.2 mm front layers and two 0.2 mm backing layers). Assign the background and backing the same filament if desired.
 
 Photos are layout references. Editable text, logos and added image elements become inlay geometry. Remove unwanted image backgrounds before export. Transparent/antialiased edges are thresholded; image regions retain their numbered artwork filament assignments. Background is independent: if it uses a fifth distinct color, remap colors to your available spools in the slicer. Fine features still require a slicer preview and test print.
 
-Print the NFC base separately, install the tag and test-fit the face before gluing. No HueForge software is needed.
-'''.replace('{face_file.name}', face_file.name),encoding='utf-8')
+{object_note} No HueForge software is needed.
+'''.replace('{face_file.name}', face_file.name).replace('{object_note}', 'Print the NFC base separately, install the tag and test-fit the face before gluing.' if project.product.kind=='nfc_card' else 'This export contains only the face-down artwork panel. Use Export object for the body and assembly guide. Use translucent artwork and diffuser filaments for a lightbox.'),encoding='utf-8')
     return out
 
 
@@ -400,6 +403,8 @@ def face_preview(project):
         im.paste(color, (0, 0, *size), Image.fromarray(mask.astype('uint8')*255))
     clip = Image.new('L', size)
     ImageDraw.Draw(clip).polygon([(x*size[0]/fw, (fh-y)*size[1]/fh) for x, y in footprint.exterior.coords], fill=255)
+    for ring in footprint.interiors:
+        ImageDraw.Draw(clip).polygon([(x*size[0]/fw, (fh-y)*size[1]/fh) for x,y in ring.coords], fill=0)
     result = Image.new('RGB', size, '#dfe7f1')
     result.paste(im, (0, 0), clip)
     return result

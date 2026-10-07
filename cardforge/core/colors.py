@@ -31,4 +31,8 @@ def export_palette(project):
     background = project.face.background_color.upper()
     ImageColor.getrgb(background)
     if background not in [c.upper() for c in colors]: colors.append(background)
+    if project.product.kind == "lightbox":
+        diffuser = project.product.diffuser_color.upper()
+        ImageColor.getrgb(diffuser)
+        if diffuser not in [c.upper() for c in colors]: colors.append(diffuser)
     return colors

@@ -9,7 +9,8 @@ runpy.run_path('scripts/build_branding.py', run_name='__main__')
 datas=[]; binaries=[]; hiddenimports=[]
 datas += [("cardforge/assets/fonts", "cardforge/assets/fonts")]
 datas += [("cardforge/assets/notices", "notices")]
-for pkg in ("cv2", "PIL", "shapely", "trimesh", "lxml", "rapidocr", "onnxruntime"):
+datas += [("cardforge/assets/commercial.json", "cardforge/assets")]
+for pkg in ("cv2", "PIL", "shapely", "trimesh", "lxml", "rapidocr", "onnxruntime", "manifold3d", "cryptography"):
     d,b,h = collect_all(pkg)
     datas += d; binaries += b; hiddenimports += h
 

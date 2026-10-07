@@ -29,7 +29,7 @@ def run():
             lines = ocr_candidates(im, 88.9, 50.8)
         recognized = ' '.join(x.text for x in lines).upper()
         assert 'CARDFORGE' in recognized and '123' in recognized, recognized
-        app = CardForgeApp()
+        app = CardForgeApp(recovery_enabled=False)
         errors = []
         app.report_callback_exception = lambda *args: errors.append(str(args))
         app.geometry('1180x760')
@@ -43,6 +43,9 @@ def run():
                     assert child.winfo_width()+5 >= child.winfo_reqwidth(), child.cget('text')
                 check_layout(child)
         check_layout(app)
+        app.geometry('1180x660');app.update();check_layout(app)
+        assert app.background_button.winfo_rooty()+app.background_button.winfo_height()<=app.winfo_rooty()+app.winfo_height()
+        app.geometry('1180x760');app.update()
         app.withdraw()
         app.run_checks()
         # Exercise real editor controls and keep the event loop alive during export.
@@ -234,6 +237,58 @@ def run():
         modal.destroy()
         scratch_output = export_face(app.project, td/'scratch-export', include_base=True)
         assert (scratch_output/'CardForge_NFC_Base.stl').exists()
+        # Exercise the new controls in the actual GUI and native solid engine.
+        from cardforge.core.products import export_product, load_model, model_surfaces
+        def click_named(widget, label):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Button) and child.cget('text')==label:
+                    child.invoke(); return True
+                if click_named(child,label): return True
+            return False
+        app.start_template('Desktop lightbox')
+        app.object_settings(); app.update()
+        assert click_named(app.grab_current(),'Apply settings')
+        assert app.grab_current() is None
+        assert app.project.product.kind=='lightbox'
+        app.show_object_preview()
+        deadline=time.monotonic()+30
+        while app.busy and time.monotonic()<deadline:
+            app.update();time.sleep(.01)
+        app.update()
+        assert not app.busy and app.object_preview_var.get()
+        assert len(app.design_canvas.find_all())==2
+        app.show_object_preview();assert not app.object_preview_var.get()
+        with patch('cardforge.gui.messagebox.showinfo',side_effect=lambda *a: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror',side_effect=lambda *a: errors.append(a)):
+            app.after(50,lambda: choose_output('Lightbox'))
+            app._export_direct(True)
+            deadline=time.monotonic()+30
+            while app.busy and time.monotonic()<deadline:
+                app.update();time.sleep(.01)
+            assert not app.busy and (target/'Lightbox'/'Lightbox_Assembly.3mf').exists()
+        app.start_template('Wall art')
+        assert (export_product(app.project,td,'Plaque')/'Print_Parts'/'Plaque_Artwork.3mf').exists()
+        mesh=trimesh.creation.box(extents=(70,50,15))
+        mesh_path=td/'target.stl';mesh.export(mesh_path)
+        target_mesh=load_model(mesh_path)
+        app.surface_dialog(mesh_path,target_mesh,model_surfaces(target_mesh));app.update()
+        assert click_named(app.grab_current(),'Use this surface')
+        assert app.project.product.kind=='stl_panel'
+        assert (export_product(app.project,td,'Attached')/'Attached_Assembly.3mf').exists()
+        app.license_dialog();app.update()
+        assert click_named(app.grab_current(),'Close')
+        with patch('cardforge.licensing.license_status',return_value={'active':False,'message':'Activate to export'}), \
+             patch('cardforge.product_ui.messagebox.showinfo'),patch.object(app,'license_dialog'):
+            assert not app.export_allowed()
+        recovery=td/'Recovery.cardforge'
+        app.recovery_enabled=True
+        with patch.object(app,'recovery_path',return_value=recovery):
+            app.project.name='Recovery test'
+            app.autosave();app._autosave_thread.join(10)
+            assert not app._autosave_thread.is_alive() and recovery.exists()
+            assert Project.load_bundle(recovery,td/'recover-assets').name=='Recovery test'
+            app.clear_recovery();assert not recovery.exists()
+        app.recovery_enabled=False
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

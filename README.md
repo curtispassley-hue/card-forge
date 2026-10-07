@@ -1,4 +1,25 @@
-# CardForge 4D 0.9 Studio Preview
+# CardForge Studio 1.0 Release Candidate
+
+
+This release candidate extends the shared image/text editor to NFC cards, wall art, editable lightboxes, and artwork panels attached to a selected flat STL surface. Choose a template under **New project**. Use **Object settings** for dimensions, **2D / 3D** for the actual assembly preview, and **Export object** for construction and print files.
+
+Windows downloads include the portable ZIP and **CardForgeStudio-Setup.exe**, a per-user installer with an optional desktop shortcut. The executable remains **CardForge4D.exe**. Portable users must extract the whole ZIP and keep `_internal` beside it. No Python or Java installation is required. Windows 10/11 on x64 is required.
+
+### New object workflows
+
+- **Wall art:** rectangle/rounded rectangle or ellipse, editable artwork thickness, separate backing, desktop cradle or wall hanging holes.
+- **Lightbox:** editable width/height, body depth, walls, fit clearance, artwork/diffuser thickness, LED width/thickness/cut interval/setback, cable exit, and removable back. Save/load lighting profiles. Print the fit coupons first. Desktop and wall presets are provided. The artwork is a separate panel in front of the shell, secured after checking fit and light leaks. The shell prints lip-down; the back prints exterior-down. The rear clearance-fit tongue is not a guaranteed retention mechanism; securing the back may require tape/fasteners after a test fit.
+- **Artwork on imported STL:** import one closed solid of at most 250,000 triangles, choose mm/cm/inch, rotate the preview, and select a connected flat surface. Layout rescales to its bounds; review text/logo placement. The original mesh keeps its coordinates. Artwork is a separate outward-facing panel with an editable attachment gap. Export preserves alignment for inspection and provides a separate face-down artwork print. It does not carve an inlay or wrap curved surfaces.
+
+Exports contain an assembled 3MF, aligned assembly STLs, independent **Print_Parts**, a portable project, and an assembly guide. Use **Print_Parts** for slicing; do not print a complete assembled lightbox as one object. Keep artwork color parts together as one multipart object. Assign filaments in Bambu Studio. Body, diffuser, and background may add colors beyond four artwork slots; remap/share spools or print body parts separately for an A1 four-spool setup.
+
+Object bounds must fit a 256 mm A1 plate. Tiling, SVG/custom image-derived outlines, automatic curved wrapping, and controller/electrical design are not included. Printability checks validate dimensions and closed solids, but cannot replace slicer inspection, a fit test, or lighting temperature/stability testing.
+
+The starter lighting profile is editable and unverified. An 8 mm, 5 V USB COB strip is a candidate; actual thickness, marked cut spacing, connector size, brightness and thermal behavior must be measured. No lighting kit is included or certified. Use the low-voltage kit's own power and installation instructions.
+
+Changed projects are recovery-saved about once a minute to `%LOCALAPPDATA%/CardForgeStudio/Recovery.cardforge` when the app is idle. A recovery prompt appears after an interrupted session. Save a recovered project to your chosen destination. Unsaved field text must be applied before it reaches the saved project. Explicit project saves remain the source of truth; recovery is best effort.
+
+For paid distribution setup and its outstanding release gates, see [COMMERCIAL_SETUP.md](COMMERCIAL_SETUP.md). Support contact: **curtispasley@gmail.com**.
 
 CardForge turns a photographed business card into a two-piece, NFC-enabled card for the Bambu Lab A1. It now generates the face directly; HueForge is not required.
 
@@ -17,7 +38,7 @@ The default face is 0.8 mm: 0.4 mm of front color inlays and 0.4 mm of solid bac
 3. Rotate images by any angle, flip them, center them, duplicate them, and change their order with **Forward / Backward**. Top layers appear in front; images sit above text. Arrow keys nudge the selected canvas item; Shift+arrow moves farther. Delete acts on the canvas selection. Undo / Redo restore edits.
 4. Use **Remove background**, **Trim transparent edges**, per-image grayscale, and silhouette recoloring in the inspector. Original files are preserved. Text size, wording, font, and filament color are available through **Edit text & font** or by double-clicking its layer.
 5. Choose four artwork filament colors below the canvas; **5 Background** is independent. Painted regions and text retain their slot assignments when colors change. **Grayscale** temporarily uses gray tones; the same button becomes **Restore color**, which restores your saved color palette. **Reset colors** restores the default artwork palette without changing the background. Toggle **Print colors** to see the thresholded print result. Match the slots to your actual filaments in Bambu Studio.
-6. **Export card** creates the face 3MF, aligned STLs, NFC base, project, and print guide. **Face only** omits the base. Choose a package name and destination in the export dialog. **Card & NFC** opens dimension settings; **Print checks** opens the printability report.
+6. **Export object** creates the face 3MF, aligned STLs, NFC base, project, and print guide. **Face only** omits the base. Choose a package name and destination in the export dialog. **Object settings** opens dimension settings; **Print checks** opens the printability report.
 
 ### Paint individual image elements
 
@@ -28,7 +49,7 @@ Select an image layer, then choose **Paint & refine image** in its inspector. Th
 - **Paint / Erase / Restore:** drag a brush. Its size is in source-image pixels. A selection constrains the brush; **Clear selection** allows painting anywhere. Restore recovers original pixels and removes paint assignments in the brushed area.
 - **Grow / Shrink / Smooth** refine a selection. Use **Invert**, then **Erase** to remove pixels outside a refined outline. Filling a selection preserves antialiased edges; painting into transparency adds geometry.
 - **Print edge threshold** controls which partly transparent pixels become solid. Lower values retain more of a soft edge. **Show printable edge** previews that cutoff at source resolution; inspect **Print colors** on the card for final print sampling.
-- Use the mouse wheel or + / − to zoom, middle-drag to pan, and Fit to reset the view. Local Undo / Redo restore workshop changes. **Apply to card** makes one undoable card edit; **Cancel** discards the workshop copy.
+- Use the mouse wheel or + / âˆ’ to zoom, middle-drag to pan, and Fit to reset the view. Local Undo / Redo restore workshop changes. **Apply to card** makes one undoable card edit; **Cancel** discards the workshop copy.
 
 Large images use a working copy no larger than 1600 × 1600 pixels; the imported file is never overwritten. This limit is shown when resampling occurs. Edits, paint maps, and restore pixels travel inside portable projects. Grayscale never overwrites the original image or stored color palette. Palettes already overwritten by an older release cannot be reconstructed automatically; choose Reset colors or set your preferred colors again.
 
@@ -46,6 +67,6 @@ Each export is written to a new named folder inside your selected destination. F
 
 Automated tests cover direct face geometry, watertight overlapping image parts, flat exterior faces, named multipart 3MF output, stable filament assignments, independent background, reversible grayscale, connected selections, edge editing, paint restoration, 30 bundled fonts, OCR, portable multiple-image projects, logo tools, undo/redo, the naming/destination dialog, GUI startup, and responsive export. Physical A1 printing and production NFC fit still require a test print.
 
-This preview adds original Windows application branding, executable version details, and an installed-dependency inventory with available license/notice files under `_internal/notices`. Font licenses remain bundled with the fonts. The program does not need Java. It is still an unsigned preview; paid activation and billing are not implemented. Source and third-party licenses are retained for distribution review.
+This preview adds original Windows application branding, executable version details, and an installed-dependency inventory with available license/notice files under `_internal/notices`. Font licenses remain bundled with the fonts. The program does not need Java. It is still an unsigned preview; signed offline license validation and an owner-only license issuer are available for a publisher-configured commercial build. This public release candidate is unrestricted for testing; checkout, signing credentials, and commercial terms still require owner setup. Source and third-party licenses are retained for distribution review.
 
 The original HueForge import helpers remain only for opening older 0.4 projects; they are not part of the new face export workflow.

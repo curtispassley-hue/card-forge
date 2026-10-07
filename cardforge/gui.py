@@ -21,6 +21,9 @@ from .core.fonts import bundled_fonts, default_font
 from .core.templates import TEMPLATES, create_template
 from .icons import Icons
 from .studio import StudioWorkspace
+from .product_ui import ProductControls
+from .core.products import export_product, KINDS, validate_product
+from .licensing import read_config
 from .core.ocr import backend_status, ocr_candidates, remove_ocr_text, candidates_to_text_layers, OCRCandidate
 from .core.logo import extract_logo, remove_logo_region, suggest_logo_regions, remove_logo_background
 from .core.image_processing import (
@@ -34,7 +37,7 @@ from .core.geometry import export_base_stl, make_face_blank, face_target_dimensi
 from .core.hueforge import import_hueforge_path  # legacy reader for 0.4 projects
 
 
-VERSION = "0.9 Preview"
+VERSION = "1.0 Release Candidate"
 NFC_PRESETS = {
     "20 mm sticker": (20.0, 0.60),
     "25 mm sticker": (25.0, 0.80),
@@ -43,18 +46,25 @@ NFC_PRESETS = {
 }
 
 
-class CardForgeApp(StudioWorkspace, tk.Tk):
-    def __init__(self):
+class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
+    def __init__(self, recovery_enabled=True):
         super().__init__()
         self.title(f"CardForge 4D {VERSION}")
-        self.geometry("1440x900")
-        self.minsize(1180, 760)
+        width=min(1440,max(1180,self.winfo_screenwidth()-80))
+        height=min(900,max(660,self.winfo_screenheight()-100))
+        self.geometry(f"{width}x{height}")
+        self.minsize(1180, 660)
 
         self.project = Project()
+        self.licensing_config = read_config()
+        self.recovery_enabled = recovery_enabled
+        self._autosave_thread = None
         self.flatforge_meshes = []
         self.tempdir = Path(tempfile.mkdtemp(prefix="CardForge4D_"))
-        self.status = tk.StringVar(value="Start with New card, or add an image or text to the canvas.")
+        self.status = tk.StringVar(value="Start with New project, or add an image or text to the canvas.")
 
+        self.object_preview_parts = []
+        self.object_yaw, self.object_pitch = 30, 55
         self.canvas_views = {}
         self.manual_mode = False
         self.manual_points = []
@@ -83,6 +93,9 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         self.bind('<Control-n>', lambda e: self.new_project())
         self.iconphoto(True, self.icons.get('app', size=64))
         self.after(100, self.refresh_design_preview)
+        if recovery_enabled:
+            self.after(500,self.offer_recovery)
+            self.after(60000,self.autosave)
 
     def report_callback_exception(self, exc, value, tb):
         messagebox.showerror("CardForge", str(value))
@@ -91,16 +104,16 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
     def _button(self, parent, label, command, icon='', style='Secondary.TButton'):
         names = {'↶': 'undo', '↷': 'redo', '‹': 'back', '›': 'next', '▣': 'image',
                  '✓': 'check', '＋': 'plus', '−': 'minus', '×': 'delete', '⇩': 'download',
-                 '✎': 'edit', '✂': 'crop', '⌕': 'search', '↺': 'undo', '↻': 'refresh',
-                 '□': 'crop', '⌖': 'crop', '◉': 'layers'}
+                 'âœŽ': 'edit', 'âœ‚': 'crop', 'âŒ•': 'search', 'â†º': 'undo', 'â†»': 'refresh',
+                 'â–¡': 'crop', 'âŒ–': 'crop', 'â—‰': 'layers'}
         if icon:
             image = self.icons.get(names.get(icon, icon), style == 'Accent.TButton')
             return ttk.Button(parent, text=label, command=command, style=style, image=image, compound='left', width=0)
         return ttk.Button(parent, text=label, command=command, style=style, width=0)
 
-    def _scroll_panel(self, parent):
+    def _scroll_panel(self, parent, expand=False):
         shell = ttk.Frame(parent, width=340)
-        shell.pack(side='left', fill='y', padx=(0, 12))
+        shell.pack(side='left', fill='both' if expand else 'y', expand=expand, padx=(12 if expand else 0, 12))
         canvas = tk.Canvas(shell, width=330, highlightthickness=0, bg='#f3f5f8')
         bar = ttk.Scrollbar(shell, orient='vertical', command=canvas.yview)
         bar.pack(side='right', fill='y')
@@ -287,10 +300,10 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             v = tk.DoubleVar(); self.vars[key] = v; self._field(left, label, v)
 
         ttk.Label(left, text="Preset thicknesses are starting points—measure your actual tag.", wraplength=285).pack(anchor="w", pady=(2, 8))
-        self._button(left, "Apply Dimensions", self.apply_geometry, '✓').pack(fill="x", pady=3)
-        self._button(left, "Export NFC Base STL...", self.export_base, '⇩').pack(fill="x", pady=3)
-        self._button(left, "Export Thin Face Blank STL...", self.export_face_blank, '⇩').pack(fill="x", pady=3)
-        self._button(left, "Export Complete Assembly Folder...", self.export_assembly, '⇩', 'Accent.TButton').pack(fill="x", pady=3)
+        self._button(left, "Apply Dimensions", self.apply_geometry, 'âœ“').pack(fill="x", pady=3)
+        self._button(left, "Export NFC Base STL...", self.export_base, 'â‡©').pack(fill="x", pady=3)
+        self._button(left, "Export Thin Face Blank STL...", self.export_face_blank, 'â‡©').pack(fill="x", pady=3)
+        self._button(left, "Export Complete Assembly Folder...", self.export_assembly, 'â‡©', 'Accent.TButton').pack(fill="x", pady=3)
 
         top = ttk.Frame(right)
         top.pack(fill="x")
@@ -310,7 +323,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         top = ttk.Frame(self.check_tab)
         top.pack(fill="x")
         ttk.Label(top, text="Printability report", font=("Segoe UI", 16, "bold")).pack(side="left")
-        self._button(top, "Run Checks", self.run_checks, '✓').pack(side="right")
+        self._button(top, "Run Checks", self.run_checks, 'âœ“').pack(side="right")
         self.check_text = tk.Text(self.check_tab, wrap="word", font=("Consolas", 10))
         self.check_text.pack(fill="both", expand=True, pady=(10, 0))
 
@@ -827,6 +840,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         """Create a standalone logo package without rebuilding the card base."""
         if self.busy:
             return
+        if not self.export_allowed(): return
         if not any(e.path and e.enabled for e in [self.project.logo, *self.project.elements]):
             messagebox.showinfo('CardForge', 'Add an image or load a logo first.')
             return
@@ -849,14 +863,15 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
     def _export_direct(self, include_base):
         if self.busy:
             return
+        if not self.export_allowed(): return
         self._sync_edits()
-        settings = self._output_settings('Export complete card' if include_base else 'Export card face')
+        settings = self._output_settings('Export object' if include_base else 'Export artwork panel')
         if not settings:
             return
         out, name = settings
         snapshot = copy.deepcopy(self.project)
-        self._background('Generating flush face geometry…', lambda: export_face(snapshot, out, include_base, output_name=name),
-                         lambda result: messagebox.showinfo('CardForge', f'Face files ready in:\n{result}\n\nOpen the Face.3mf file in Bambu Studio and assign filament colors under Objects / Parts.'))
+        self._background('Generating flush face geometry…', lambda: export_product(snapshot, out, output_name=name) if include_base else export_face(snapshot, out, False, output_name=name),
+                         lambda result: messagebox.showinfo('CardForge', f'Files ready in:\n{result}\n\nRead the included assembly/print guide and assign filaments to the named artwork parts in Bambu Studio.'))
 
     def browse_output_folder(self):
         current = self.output_dir_var.get().strip()
@@ -940,6 +955,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
 
 
     def export_face_stls(self):
+        if not self.export_allowed(): return
         if not self.flatforge_meshes:
             messagebox.showinfo("CardForge", "Import HueForge / FlatForge geometry first.")
             return
@@ -988,6 +1004,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         self.status.set("Geometry updated.")
 
     def export_base(self):
+        if not self.export_allowed(): return
         self.apply_geometry()
         p = filedialog.asksaveasfilename(defaultextension=".stl", filetypes=[("STL", "*.stl")], initialfile="CardForge_NFC_Base.stl")
         if p:
@@ -995,6 +1012,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             messagebox.showinfo("CardForge", f"Base STL saved:\n{p}")
 
     def export_face_blank(self):
+        if not self.export_allowed(): return
         self.apply_geometry(); self.sync_face_fields()
         p = filedialog.asksaveasfilename(defaultextension=".stl", filetypes=[("STL", "*.stl")], initialfile="CardForge_Face_Blank.stl")
         if p:
@@ -1007,6 +1025,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
 
     # ---------- 3D PREVIEW ----------
     def draw_3d_preview(self):
+        if self.project.product.kind != 'nfc_card': return
         if not hasattr(self, "preview3d"):
             return
         c = self.preview3d
@@ -1070,6 +1089,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
     def run_checks(self):
         if not hasattr(self, "check_text"):
             return
+        if self.project.product.kind != 'nfc_card':
+            self.product_report(); return
         g, n, h = self.project.geometry, self.project.nfc, self.project.hueforge
         issues, warnings, ok = [], [], []
 
@@ -1154,7 +1175,7 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
         warnings.append('Use matching first-layer / layer heights that divide the front depth. Inspect fine lettering in the slicer before printing.')
 
         text = "CARDFORGE 4D PRINTABILITY REPORT\n\n"
-        text += "PASS\n" + ("\n".join("✓ " + x for x in ok) if ok else "None") + "\n\n"
+        text += "PASS\n" + ("\n".join("âœ“ " + x for x in ok) if ok else "None") + "\n\n"
         text += "WARNINGS\n" + ("\n".join("! " + x for x in warnings) if warnings else "None") + "\n\n"
         text += "BLOCKING ISSUES\n" + ("\n".join("X " + x for x in issues) if issues else "None detected by current checks.")
         self.check_text.delete("1.0", tk.END)
@@ -1166,6 +1187,8 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             return
         self.selected = None
         self.project = create_template(name)
+        self.object_preview_var.set(False)
+        self.object_preview_parts = []
         self.flatforge_meshes = []
         self.manual_points = []
         self.manual_mode = False
@@ -1196,11 +1219,14 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             return False
         saved = self.project.save_bundle(path)
         self._saved_data = asdict(self.project)
+        self.clear_recovery()
         self.refresh_design_preview()
         self.status.set(f'Saved {saved.name}. Images and fonts are included.')
         return True
 
     def close_project(self):
+        if self.grab_current() is not None:
+            self.grab_current().lift();return
         if self.busy:
             messagebox.showinfo('CardForge', 'Please wait for the current operation to finish before closing.')
             return
@@ -1209,7 +1235,35 @@ class CardForgeApp(StudioWorkspace, tk.Tk):
             answer = messagebox.askyesnocancel('Save your card?', 'Save your changes before closing?')
             if answer is None or (answer and not self.save_project()):
                 return
+        self.clear_recovery()
         self.destroy()
+
+    def recovery_path(self):
+        from .licensing import state_dir
+        return state_dir()/'Recovery.cardforge'
+
+    def clear_recovery(self):
+        if self.recovery_enabled and not (self._autosave_thread and self._autosave_thread.is_alive()):
+            self.recovery_path().unlink(missing_ok=True)
+
+    def offer_recovery(self):
+        path=self.recovery_path()
+        if path.exists() and messagebox.askyesno('Recover your project?','A recovery project is available from an earlier session. Open it?'):
+            try:
+                self.project=Project.load_bundle(path,self.tempdir/uuid.uuid4().hex)
+                self.selected=None;self.sync_ui_from_project();self.refresh_design_preview()
+                self.status.set('Recovery opened. Save it to your chosen destination.')
+            except (ValueError,OSError) as exc: messagebox.showerror('Project recovery',str(exc))
+
+    def autosave(self):
+        if self.recovery_enabled:
+            if not self.busy and asdict(self.project)!=self._saved_data and not (self._autosave_thread and self._autosave_thread.is_alive()):
+                snapshot=copy.deepcopy(self.project);path=self.recovery_path()
+                def save():
+                    try: snapshot.save_bundle(path)
+                    except (ValueError,OSError): pass  # Keep the last intact recovery bundle.
+                self._autosave_thread=threading.Thread(target=save,daemon=True);self._autosave_thread.start()
+            self.after(60000,self.autosave)
 
     def open_project(self):
         if self.busy:

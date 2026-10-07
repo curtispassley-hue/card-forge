@@ -92,8 +92,35 @@ class FaceSettings:
 
 
 @dataclass
+class ProductSettings:
+    kind: str = 'nfc_card'
+    outline: str = 'rectangle'
+    body_color: str = '#111111'
+    backing_mm: float = 2.0
+    wall_mm: float = 2.0
+    depth_mm: float = 30.0
+    fit_mm: float = 0.25
+    diffuser_color: str = '#FFFFFF'
+    led_width_mm: float = 10.0
+    led_thickness_mm: float = 2.0
+    led_cut_mm: float = 50.0
+    led_setback_mm: float = 12.0
+    cable_diameter_mm: float = 5.0
+    cable_side: str = 'bottom'
+    mounting: str = 'desktop'
+    lighting_name: str = 'Custom dimensions — unverified'
+    model_path: str = ''
+    model_units: str = 'mm'
+    surface_index: int = 0
+    surface_outline: list = field(default_factory=list)
+    surface_holes: list = field(default_factory=list)
+    surface_transform: list = field(default_factory=list)
+    surface_gap_mm: float = 0.05
+
+
+@dataclass
 class Project:
-    format_version: str = "0.9.0"
+    format_version: str = "1.0.0"
     name: str = "Untitled Card"
     source_image: str = ""
     corrected_image: str = ""
@@ -112,6 +139,7 @@ class Project:
     # retained as the first element so projects from 0.4–0.7 remain portable.
     elements: list[LogoLayer] = field(default_factory=list)
     face: FaceSettings = field(default_factory=FaceSettings)
+    product: ProductSettings = field(default_factory=ProductSettings)
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
@@ -126,6 +154,7 @@ class Project:
         data["hueforge"] = HueForgeSettings(**colors)
         data["editor"] = EditorSettings(**data.get("editor", {}))
         data["face"] = FaceSettings(**data.get("face", {}))
+        data['product'] = ProductSettings(**data.get('product', {}))
         data["texts"] = [TextLayer(**x) for x in data.get("texts", [])]
         data["logo"] = LogoLayer(**data.get("logo", {}))
         data["elements"] = [LogoLayer(**x) for x in data.get("elements", [])]
@@ -152,6 +181,7 @@ class Project:
             path = path.with_suffix(".cardforge")
 
         data = asdict(self)
+        data['format_version'] = '1.0.0'
         asset_map = {}
         used = set()
 
@@ -160,7 +190,7 @@ class Project:
                 return value
             p = Path(value)
             if not p.exists() or not p.is_file():
-                return value
+                raise ValueError(f"Project asset is missing: {p.name}. Reload it before saving.")
             base = p.name
             name = f"{role}_{base}"
             n = 2
@@ -173,6 +203,7 @@ class Project:
 
         for key in ("source_image", "corrected_image", "cleaned_image"):
             data[key] = bundle_asset(data.get(key, ""), key)
+        data['product']['model_path'] = bundle_asset(data['product']['model_path'], 'model')
         data["logo"]["path"] = bundle_asset(data.get("logo", {}).get("path", ""), "logo")
         for key in ('paint_slots_path', 'edit_source_path'):
             data['logo'][key] = bundle_asset(data['logo'].get(key, ''), 'logo_'+key)
@@ -233,6 +264,8 @@ class Project:
 
         for key in ("source_image", "corrected_image", "cleaned_image", "hueforge_import_path"):
             data[key] = resolve(data.get(key, ""))
+        if 'product' in data:
+            data['product']['model_path'] = resolve(data['product'].get('model_path', ''))
         for layer in data.get("texts", []):
             layer["font_path"] = resolve(layer.get("font_path", ""))
         if "logo" in data:

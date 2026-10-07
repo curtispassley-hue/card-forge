@@ -1,4 +1,4 @@
-name: Build CardForge4D 0.9 Studio Windows App
+name: Build CardForge Studio 1.0 Windows App
 
 on:
   workflow_dispatch:
@@ -69,6 +69,30 @@ jobs:
           if (-not $result.passed) { throw 'EXE self-test did not pass' }
           Get-Content $report
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" installer/CardForgeStudio.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
+
+      - name: Test installation and removal
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'CardForge-installed-test'
+          $setup = Start-Process dist/CardForgeStudio-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target" -PassThru -WindowStyle Hidden
+          if (-not $setup.WaitForExit(180000)) { $setup.Kill(); throw 'Installation timed out' }
+          if ($setup.ExitCode -ne 0) { throw 'Installation failed' }
+          $report = Join-Path $PWD 'installer-test.json'
+          $app = Start-Process "$target/CardForge4D.exe" -ArgumentList '--self-test', $report -PassThru -WindowStyle Hidden
+          if (-not $app.WaitForExit(180000)) { $app.Kill(); throw 'Installed app timed out' }
+          if ($app.ExitCode -ne 0) { Get-Content $report; throw 'Installed app self-test failed' }
+          $result = Get-Content $report -Raw | ConvertFrom-Json
+          if (-not $result.passed) { throw 'Installed app test did not pass' }
+          Get-Content $report
+          $uninstaller = Start-Process "$target/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -WindowStyle Hidden
+          if (-not $uninstaller.WaitForExit(120000)) { $uninstaller.Kill(); throw 'Uninstall timed out' }
+          if ($uninstaller.ExitCode -ne 0 -or (Test-Path "$target/CardForge4D.exe")) { throw 'Uninstall failed' }
+
       - name: Create distributable ZIP
         shell: pwsh
         run: |
@@ -76,21 +100,24 @@ jobs:
           Copy-Item dist\CardForge4D release\CardForge4D -Recurse
           Copy-Item README.md release\README.md
           Copy-Item LICENSE.txt release\LICENSE.txt
+          Copy-Item COMMERCIAL_SETUP.md release\COMMERCIAL_SETUP.md
           Compress-Archive -Path release\* -DestinationPath CardForge4D-Windows.zip -Force
           git archive --format=zip --output=CardForge4D-Source.zip HEAD
+          $files = @('CardForge4D-Windows.zip', 'CardForge4D-Source.zip', 'dist/CardForgeStudio-Setup.exe')
+          $files | ForEach-Object { $hash = Get-FileHash -Algorithm SHA256 $_; "$($hash.Hash.ToLower())  $([IO.Path]::GetFileName($_))" } | Set-Content -Encoding utf8 SHA256SUMS.txt
 
-      - name: Publish tested alpha download
+      - name: Publish tested release candidate
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $tag = 'v0.9.0-preview.${{ github.run_number }}'
+          $tag = 'v1.0.0-rc.${{ github.run_number }}'
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge 4D 0.9 Studio Preview' --notes-file RELEASE_NOTES_0_9.md
+            gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge Studio 1.0 Release Candidate' --notes-file RELEASE_NOTES_1_0.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
-          gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip exe-test.json defender-scan.json --clobber
+          gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip dist/CardForgeStudio-Setup.exe exe-test.json installer-test.json defender-scan.json SHA256SUMS.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
 
       - name: Upload EXE artifact
@@ -103,6 +130,9 @@ jobs:
             defender-scan.json
             exe-test.json
             source-test.json
+            installer-test.json
+            dist/CardForgeStudio-Setup.exe
+            SHA256SUMS.txt
 
       - name: Upload diagnostics
         if: failure()

@@ -30,3 +30,7 @@ six==1.17.0
 tqdm==4.70.0
 trimesh==5.1.0
 urllib3==2.7.0
+manifold3d==3.5.4
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.0
