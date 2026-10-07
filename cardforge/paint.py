@@ -8,12 +8,11 @@ from .core.painting import PixelEditor
 from .core.colors import effective_palette
 
 
-class ImageWorkshop(tk.Toplevel):
+class ImageWorkshop(ttk.Frame):
     def __init__(self, app, layer):
-        super().__init__(app)
+        super().__init__(app.paint_host)
+        self.pack(fill='both', expand=True)
         self.app, self.layer = app, layer
-        self.title('Image workshop — select, paint & refine')
-        self.geometry('1080x760'); self.minsize(920, 660); self.transient(app)
         with Image.open(layer.path) as raw: im = raw.convert('RGBA')
         original_size = im.size
         # Bounded working resolution and undo memory prevent huge imports freezing the UI.
@@ -33,20 +32,21 @@ class ImageWorkshop(tk.Toplevel):
         self.contiguous = tk.BooleanVar(value=True)
         self.cutoff = tk.IntVar(value=layer.alpha_cutoff)
         self.edge_preview = tk.BooleanVar(value=False)
+        self._fit_ready = False
         self.zoom = 1.; self.last_point = None; self._render_job = None
         self.status = tk.StringVar(value='Wand: click one image element, then choose a filament and Fill selection.')
         header = ttk.Frame(self, padding=14); header.pack(fill='x')
-        ttk.Label(header, text='Image workshop', style='Title.TLabel').pack(side='left')
-        ttk.Label(header, text='Edit pixels here • Position and size stay on the card', style='Muted.TLabel').pack(side='right')
+        ttk.Label(header, text='Paint colors & refine edges', style='Title.TLabel').pack(side='left')
+        ttk.Label(header, text='Editing an image • Position and size stay on the object', style='Muted.TLabel').pack(side='right')
         footer = ttk.Frame(self, padding=12); footer.pack(side='bottom', fill='x')
-        app._button(footer, 'Cancel', self.cancel, 'back').pack(side='left')
-        app._button(footer, 'Apply to card', self.apply, 'check', 'Accent.TButton').pack(side='right')
+        app._button(footer, 'Cancel painting', self.cancel, 'back').pack(side='left')
+        app._button(footer, 'Done painting', self.apply, 'check', 'Accent.TButton').pack(side='right')
         ttk.Label(self, textvariable=self.status, padding=(14, 6), style='Muted.TLabel', wraplength=990).pack(side='bottom', fill='x')
         if self.resampled:
             ttk.Label(self, text=f'Working copy: {im.width} × {im.height} pixels. Original file is preserved.', style='Muted.TLabel').pack(side='bottom')
         body = ttk.Frame(self, padding=(14, 0)); body.pack(fill='both', expand=True)
-        control_shell = ttk.Frame(body); control_shell.pack(side='left', fill='y', padx=(0,12))
-        control_canvas = tk.Canvas(control_shell, width=232, bg='#eef2f6', highlightthickness=0)
+        control_shell = ttk.Frame(body); control_shell.pack(side='right', fill='y', padx=(12,0))
+        control_canvas = tk.Canvas(control_shell, width=232, bg='#1a1d23', highlightthickness=0)
         scroll = ttk.Scrollbar(control_shell, orient='vertical', command=control_canvas.yview)
         scroll.pack(side='right', fill='y'); control_canvas.pack(side='left', fill='y')
         controls = ttk.Frame(control_canvas, padding=(0,0,6,8))
@@ -100,9 +100,10 @@ class ImageWorkshop(tk.Toplevel):
         app._button(bar, '+', lambda: self.change_zoom(1.5)).pack(side='right')
         app._button(bar, '−', lambda: self.change_zoom(1/1.5)).pack(side='right', padx=4)
         app._button(bar, 'Fit', self.fit).pack(side='right')
-        self.canvas = tk.Canvas(right, bg='#dce4ed', highlightthickness=0)
+        self.canvas = tk.Canvas(right, bg='#111317', highlightthickness=0)
         self.canvas.pack(fill='both', expand=True)
-        self.canvas.bind('<Configure>', lambda e: self.schedule_render())
+        self.canvas.bind('<Escape>', lambda e: self.clear_selection())
+        self.canvas.bind('<Configure>', lambda e: self.schedule_render() if self._fit_ready else self.after_idle(self.fit))
         self.canvas.bind('<ButtonPress-1>', self.press)
         self.canvas.bind('<B1-Motion>', self.drag)
         self.canvas.bind('<ButtonRelease-1>', lambda e: setattr(self, 'last_point', None))
@@ -113,8 +114,7 @@ class ImageWorkshop(tk.Toplevel):
         self.bind('<Control-z>', lambda e: self.action(self.editor.undo))
         self.bind('<Control-y>', lambda e: self.action(self.editor.redo))
         self.bind('<Escape>', lambda e: self.clear_selection())
-        self.protocol('WM_DELETE_WINDOW', self.cancel)
-        self.update_idletasks(); self.fit(); self.grab_set()
+        self.update_idletasks(); self.fit()
 
     def valid_int(self, variable, minimum, maximum, label):
         try: value = variable.get()
@@ -126,7 +126,7 @@ class ImageWorkshop(tk.Toplevel):
         try:
             callback(); self.render()
             count = int(self.editor.selection.sum()) if self.editor.selection is not None else 0
-            self.status.set(f'{count:,} selected pixels. Apply to card keeps these edits; Cancel discards them.')
+            self.status.set(f'{count:,} selected pixels. Done painting keeps these edits; Cancel painting discards them.')
         except (ValueError, tk.TclError) as exc: self.status.set(str(exc))
 
     def clear_selection(self):
@@ -149,6 +149,8 @@ class ImageWorkshop(tk.Toplevel):
 
     def fit(self):
         c = self.canvas; im = self.editor.image
+        if c.winfo_width() <= 100 or c.winfo_height() <= 100: return
+        self._fit_ready = True
         self.zoom = min((max(100,c.winfo_width())-30)/im.width, (max(100,c.winfo_height())-30)/im.height)
         self.ox = (c.winfo_width()-im.width*self.zoom)/2
         self.oy = (c.winfo_height()-im.height*self.zoom)/2
@@ -206,16 +208,20 @@ class ImageWorkshop(tk.Toplevel):
             overlay.putalpha(Image.fromarray(self.editor.selection.astype('uint8')*85))
             image = Image.alpha_composite(image,overlay)
         tile = image.transform((w,h),Image.Transform.AFFINE,(1/self.zoom,0,-self.ox/self.zoom,0,1/self.zoom,-self.oy/self.zoom),resample=Image.Resampling.NEAREST)
-        check = Image.new('RGBA',(w,h),'#f5f7fa'); draw=ImageDraw.Draw(check)
+        check = Image.new('RGBA',(w,h),'#252931'); draw=ImageDraw.Draw(check)
         for y in range(0,h,16):
             for x in range(0,w,16):
-                if (x//16+y//16)%2: draw.rectangle((x,y,x+15,y+15),fill='#dce4ed')
+                if (x//16+y//16)%2: draw.rectangle((x,y,x+15,y+15),fill='#343a44')
         check.alpha_composite(tile)
         self.photo = ImageTk.PhotoImage(check); c.delete('all'); c.create_image(0,0,anchor='nw',image=self.photo)
 
     def cancel(self):
         if self._render_job is not None: self.after_cancel(self._render_job)
-        self.grab_release(); self.destroy()
+        self.destroy()
+        self.app.image_workshop = None
+        self.app.paint_host.grid_remove()
+        self.app.palette_panel.pack(before=self.app.progress, fill='x')
+        self.app.after_idle(self.app.refresh_design_preview)
 
     def apply(self):
         try: cutoff = self.valid_int(self.cutoff,1,255,'Edge threshold')

@@ -11,13 +11,13 @@ def icon_image(name, color='#334155', size=20):
     def rect(box, radius=2):
         d.rounded_rectangle(tuple(round(n*scale) for n in box), radius=radius*scale, outline=color, width=7)
     if name == 'app':
-        d.rounded_rectangle((0, 0, 96, 96), radius=22, fill='#132439')
-        d.rounded_rectangle((16, 22, 79, 77), radius=8, fill='#087f8c')
-        d.rounded_rectangle((23, 17, 84, 67), radius=8, fill='#dff5f3')
-        d.rounded_rectangle((31, 28, 48, 48), radius=4, fill='#087f8c')
-        d.line([(56, 32), (74, 32)], fill='#132439', width=5)
-        d.line([(56, 42), (70, 42)], fill='#132439', width=5)
-        d.line([(32, 57), (74, 57)], fill='#087f8c', width=4)
+        d.rounded_rectangle((0, 0, 96, 96), radius=22, fill='#111317')
+        d.rounded_rectangle((16, 22, 79, 77), radius=8, fill='#ffb261')
+        d.rounded_rectangle((23, 17, 84, 67), radius=8, fill='#eff1f4')
+        d.rounded_rectangle((31, 28, 48, 48), radius=4, fill='#ffb261')
+        d.line([(56, 32), (74, 32)], fill='#111317', width=5)
+        d.line([(56, 42), (70, 42)], fill='#111317', width=5)
+        d.line([(32, 57), (74, 57)], fill='#ffb261', width=4)
     elif name == 'settings':
         for y, x in [(6, 8), (12, 16), (18, 10)]:
             line([(3, y), (21, y)])
@@ -89,5 +89,5 @@ class Icons:
     def get(self, name, light=False, size=20):
         key = (name, light, size)
         if key not in self.cache:
-            self.cache[key] = ImageTk.PhotoImage(icon_image(name, '#FFFFFF' if light else '#334155', size))
+            self.cache[key] = ImageTk.PhotoImage(icon_image(name, '#111317' if light else '#d8dee8', size))
         return self.cache[key]

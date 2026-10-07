@@ -51,6 +51,8 @@ def run():
         app.report_callback_exception = lambda *args: errors.append(str(args))
         app.geometry('1180x760')
         app.update()
+        assert app.phase == 'setup'
+        assert app.set_phase('design')
         assert app.design_canvas.winfo_width() >= 400
         # Buttons must retain visible labels at the minimum supported size.
         from tkinter import ttk
@@ -61,6 +63,19 @@ def run():
                 check_layout(child)
         check_layout(app)
         app.geometry('1180x660');app.update();check_layout(app)
+        for phase in ('setup','export','design'):
+            assert app.set_phase(phase)
+            app.update(); check_layout(app)
+        # Invalid setup fields keep the current phase and never alter the project.
+        before_width=app.project.geometry.card_width_mm
+        app.setup_values['geometry','card_width_mm'].set('nan')
+        assert not app.set_phase('export')
+        assert app.project.geometry.card_width_mm==before_width
+        app.sync_setup_fields()
+        from dataclasses import asdict
+        before_phase=asdict(app.project)
+        for phase in ('setup','export','design'): assert app.set_phase(phase)
+        assert asdict(app.project)==before_phase
         assert app.background_button.winfo_rooty()+app.background_button.winfo_height()<=app.winfo_rooty()+app.winfo_height()
         app.geometry('1180x760');app.update()
         app.withdraw()
@@ -151,11 +166,20 @@ def run():
         app.open_image_workshop()
         workshop = app.image_workshop
         app.update()
+        assert not app.set_phase('export')
+        assert app.grab_current() is None
+        assert not app.save_project()
+        workshop.fit()
+        assert workshop._fit_ready
+        from types import SimpleNamespace
+        center=workshop.point(SimpleNamespace(x=workshop.canvas.winfo_width()/2,y=workshop.canvas.winfo_height()/2))
+        assert abs(center[0]-workshop.editor.image.width/2)<1 and abs(center[1]-workshop.editor.image.height/2)<1
         workshop.editor.select_region((50,50),0)
         workshop.editor.fill(slot=4)
         workshop.cutoff.set(90)
         workshop.apply()
         painted_path = app.project.elements[0].path
+        assert app.phase == 'design' and not app.painting_active()
         assert painted_path != previous_path and Path(app.project.elements[0].paint_slots_path).exists()
         assert app.project.elements[0].alpha_cutoff == 90
         app.undo(); assert app.project.elements[0].path == previous_path
@@ -180,26 +204,17 @@ def run():
         target = td/'face-output'
         target.mkdir()
         notices = []
-        # Drive the actual export modal, including destination and package name.
+        # Drive the inline export panel, including destination and package name.
         def choose_output(name):
             app.output_name_var.set(name)
             app.output_dir_var.set(str(target))
-            import tkinter as tk
-            def visit(widget):
-                for child in widget.winfo_children():
-                    if isinstance(child, __import__('tkinter.ttk', fromlist=['Button']).Button) and child.cget('text') == 'Export files':
-                        child.invoke()
-                        return True
-                    if visit(child): return True
-                return False
-            for child in app.winfo_children():
-                if isinstance(child, tk.Toplevel) and visit(child): return
-            errors.append('Export dialog button was not found')
+            app.export_button.invoke()
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
-             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
-             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
-            app.after(50, lambda: choose_output('SampleFace'))
+             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a, **kw: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a, **kw: errors.append(a)):
             app.export_face_files()
+            assert app.phase == 'export'
+            choose_output('SampleFace')
             assert app.busy
             ticks = 0
             deadline = time.monotonic() + 30
@@ -213,10 +228,10 @@ def run():
         assert (face_output/'SampleFace_Parts.json').exists()
         assert (face_output/'Aligned_STLs').is_dir()
         with patch('cardforge.gui.filedialog.askdirectory', return_value=str(target)), \
-             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a: notices.append(a)), \
-             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a: errors.append(a)):
-            app.after(50, lambda: choose_output('SampleLogo'))
+             patch('cardforge.gui.messagebox.showinfo', side_effect=lambda *a, **kw: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror', side_effect=lambda *a, **kw: errors.append(a)):
             app.export_logo_stl()
+            choose_output('SampleLogo')
             deadline = time.monotonic() + 30
             while app.busy and time.monotonic() < deadline:
                 app.update()
@@ -245,13 +260,13 @@ def run():
         assert len(app.project.texts) == 4
         app.text_dialog(0)
         app.update()
-        # The self-test intentionally keeps the root withdrawn.  Tk therefore
-        # reports a dialog as not viewable even though it was created and owns
-        # the input grab; inspect the actual child window instead.
-        import tkinter as tk
-        modal = app.grab_current()
-        assert isinstance(modal, tk.Toplevel)
-        modal.destroy()
+        assert app.grab_current() is None and app.phase == 'design'
+        original_text = app.project.texts[0].text
+        app.inspector_vars['name'].set('Studio text')
+        app.inspector_vars['size'].set('12')
+        assert app.commit_selected()
+        assert app.project.texts[0].text == 'Studio text' and app.project.texts[0].size_pt == 12
+        app.undo(); assert app.project.texts[0].text == original_text
         scratch_output = export_face(app.project, td/'scratch-export', include_base=True)
         assert (scratch_output/'CardForge_NFC_Base.stl').exists()
         # Exercise the new controls in the actual GUI and native solid engine.
@@ -264,7 +279,10 @@ def run():
             return False
         app.start_template('Desktop lightbox')
         app.object_settings(); app.update()
-        assert click_named(app.grab_current(),'Apply settings')
+        assert app.phase == 'setup' and app.grab_current() is None
+        app.setup_values['product','depth_mm'].set('35')
+        assert click_named(app.right_panels['setup'],'Apply settings')
+        assert app.project.product.depth_mm == 35
         assert app.grab_current() is None
         assert app.project.product.kind=='lightbox'
         app.show_object_preview()
@@ -275,10 +293,10 @@ def run():
         assert not app.busy and app.object_preview_var.get()
         assert len(app.design_canvas.find_all())==2
         app.show_object_preview();assert not app.object_preview_var.get()
-        with patch('cardforge.gui.messagebox.showinfo',side_effect=lambda *a: notices.append(a)), \
-             patch('cardforge.gui.messagebox.showerror',side_effect=lambda *a: errors.append(a)):
-            app.after(50,lambda: choose_output('Lightbox'))
+        with patch('cardforge.gui.messagebox.showinfo',side_effect=lambda *a, **kw: notices.append(a)), \
+             patch('cardforge.gui.messagebox.showerror',side_effect=lambda *a, **kw: errors.append(a)):
             app._export_direct(True)
+            choose_output('Lightbox')
             deadline=time.monotonic()+30
             while app.busy and time.monotonic()<deadline:
                 app.update();time.sleep(.01)
@@ -308,4 +326,4 @@ def run():
         app.recovery_enabled=False
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'inline_named_export': True, 'dark_studio_phases': True, 'inline_painting': True, 'contextual_text_editor': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

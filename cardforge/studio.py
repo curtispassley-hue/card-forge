@@ -14,30 +14,13 @@ from .core.logo import remove_logo_background
 from .core.templates import TEMPLATES
 from .core.fonts import default_font
 from .core.colors import effective_palette
+from .shell import StudioShell
+from . import theme
 
 
-class StudioWorkspace:
+class StudioWorkspace(StudioShell):
     def _style(self):
-        self.configure(bg='#eef2f6')
-        s = ttk.Style(self)
-        s.theme_use('clam')
-        s.configure('.', font=('Segoe UI', 10), background='#eef2f6', foreground='#203149')
-        s.configure('TButton', padding=(10, 7), relief='flat')
-        s.configure('Secondary.TButton', background='#e2e9f1', foreground='#24364f', padding=(10, 7), borderwidth=0)
-        s.map('Secondary.TButton', background=[('active', '#cddce9')])
-        s.configure('Accent.TButton', background='#087f8c', foreground='white', padding=(12, 8), borderwidth=0, font=('Segoe UI', 10, 'bold'))
-        s.map('Accent.TButton', background=[('active', '#056570'), ('disabled', '#8eafb2')])
-        s.configure('Danger.TButton', background='#fbe9e8', foreground='#9d3333', padding=(10, 7))
-        s.configure('Title.TLabel', font=('Segoe UI', 19, 'bold'))
-        s.configure('Step.TLabel', font=('Segoe UI', 9, 'bold'), foreground='#087f8c')
-        s.configure('Muted.TLabel', foreground='#65768a')
-        s.configure('TEntry', padding=6, fieldbackground='white', bordercolor='#cbd5e1')
-        s.configure('TSpinbox', padding=5, fieldbackground='white', bordercolor='#cbd5e1')
-        s.configure('TCombobox', padding=5, fieldbackground='white')
-        s.configure('Section.TLabelframe', padding=10, relief='solid', borderwidth=1)
-        s.configure('Section.TLabelframe.Label', font=('Segoe UI', 10, 'bold'))
-        s.configure('Treeview', rowheight=36, font=('Segoe UI', 10), background='white', fieldbackground='white', borderwidth=0)
-        s.map('Treeview', background=[('selected', '#d5eef0')], foreground=[('selected', '#075560')])
+        theme.apply_theme(self)
 
     def _tool_window(self, title, geometry):
         win = tk.Toplevel(self)
@@ -75,98 +58,7 @@ class StudioWorkspace:
         self.bg_tolerance = tk.DoubleVar(value=34)
         self.ocr_status_var = tk.StringVar()
 
-        header = tk.Frame(self, bg='#132439', padx=18, pady=13)
-        header.pack(fill='x')
-        tk.Label(header, text='CARDFORGE', bg='#132439', fg='white', font=('Segoe UI', 19, 'bold')).pack(side='left')
-        tk.Label(header, text='STUDIO  /  1.0 RC', bg='#132439', fg='#8bb7c3', font=('Segoe UI', 9, 'bold')).pack(side='left', padx=18)
-        self._button(header, 'Export object', self.export_assembly, 'download', 'Accent.TButton').pack(side='right', padx=(8, 0))
-        self._button(header, 'Save project', self.save_project, 'save').pack(side='right', padx=(8, 0))
-        self._button(header, 'Open', self.open_project, 'folder').pack(side='right')
-        self._button(header, 'License', self.license_dialog, 'settings').pack(side='right',padx=6)
-
-        toolbar = ttk.Frame(self, padding=(16, 10)); toolbar.pack(fill='x')
-        new = ttk.Menubutton(toolbar, text='New project ▾', style='Secondary.TButton')
-        menu = tk.Menu(new, tearoff=False)
-        for name in TEMPLATES:
-            menu.add_command(label=name, command=lambda n=name: self.start_template(n))
-        menu.add_separator()
-        menu.add_command(label='Artwork on imported STL…', command=self.import_stl_target)
-        new.configure(menu=menu); new.pack(side='left', padx=(0, 8))
-        self._button(toolbar, 'Add image', self.load_elements, 'image').pack(side='left', padx=(0, 6))
-        self._button(toolbar, 'Add text', self.add_text, 'text').pack(side='left')
-        self._button(toolbar, 'Undo', self.undo, 'undo').pack(side='left', padx=(20, 6))
-        self._button(toolbar, 'Redo', self.redo, 'redo').pack(side='left')
-        self._button(toolbar, 'Object settings', self.object_settings, 'settings').pack(side='right')
-        self._button(toolbar, 'Photo tools', lambda: self.show_tool('photo'), 'crop').pack(side='right', padx=6)
-
-        body = ttk.Frame(self, padding=(14, 0, 14, 0)); body.pack(fill='both', expand=True)
-        layers = ttk.Frame(body, width=212, padding=(0, 6, 12, 0)); layers.pack(side='left', fill='y')
-        layers.pack_propagate(False)
-        ttk.Label(layers, text='LAYERS', style='Step.TLabel').pack(anchor='w', pady=(0, 7))
-        ttk.Label(layers, text='Select an item to edit it.', style='Muted.TLabel').pack(anchor='w', pady=(0, 10))
-        self.layer_tree = ttk.Treeview(layers, show='tree', selectmode='browse')
-        self.layer_tree.column('#0', width=190, stretch=True)
-        self.layer_tree.pack(fill='both', expand=True)
-        self.layer_tree.tag_configure('hidden', foreground='#92a1b0')
-        self.layer_tree.bind('<<TreeviewSelect>>', self._tree_selected)
-        self.layer_tree.bind('<Double-1>', lambda e: self.edit_selected_text() if self.selected and self.selected[0] == 'text' else None)
-        row = ttk.Frame(layers); row.pack(fill='x', pady=(8, 4))
-        self._button(row, 'Duplicate', self.duplicate_selected, 'layers').pack(side='left', fill='x', expand=True)
-        self._button(row, 'Delete', self.delete_selected, 'delete', 'Danger.TButton').pack(side='right', padx=(4, 0))
-        row = ttk.Frame(layers); row.pack(fill='x', pady=4)
-        self._button(row, 'Forward', lambda: self.reorder_selected(1), 'up').pack(side='left', expand=True, fill='x')
-        self._button(row, 'Backward', lambda: self.reorder_selected(-1), 'down').pack(side='right', expand=True, fill='x', padx=(4, 0))
-        ttk.Label(layers, text='Top layers appear in front.\nImages sit above text.', style='Muted.TLabel').pack(anchor='w', pady=8)
-
-        inspector_shell = ttk.Frame(body, width=282)
-        inspector_shell.pack(side='right', fill='y', padx=(12, 0))
-        self._build_inspector(inspector_shell)
-        center = ttk.Frame(body); center.pack(fill='both', expand=True)
-        top = ttk.Frame(center, padding=(8, 6)); top.pack(fill='x')
-        ttk.Label(top, textvariable=self.document_var, font=('Segoe UI', 12, 'bold')).pack(side='left')
-        self._button(top,'2D / 3D',self.show_object_preview,'layers').pack(side='right',padx=(8,0))
-        ttk.Checkbutton(top, text='Print colors', variable=self.print_view_var, command=self.refresh_design_preview).pack(side='right')
-        stage = ttk.Frame(center); stage.pack(fill='both', expand=True)
-        self.design_canvas = tk.Canvas(stage, bg='#dce4ed', highlightthickness=0, cursor='arrow')
-        vertical = ttk.Scrollbar(stage, orient='vertical', command=self.design_canvas.yview)
-        horizontal = ttk.Scrollbar(center, orient='horizontal', command=self.design_canvas.xview)
-        vertical.pack(side='right', fill='y'); self.design_canvas.pack(fill='both', expand=True)
-        horizontal.pack(fill='x')
-        self.design_canvas.configure(xscrollcommand=horizontal.set, yscrollcommand=vertical.set)
-        for event, handler in [('<ButtonPress-1>', self.design_press), ('<B1-Motion>', self.design_drag), ('<ButtonRelease-1>', self.design_release)]:
-            self.design_canvas.bind(event, handler)
-        self.design_canvas.bind('<Configure>', self._schedule_canvas)
-        self.design_canvas.bind('<ButtonPress-2>', lambda e: self.design_canvas.scan_mark(e.x, e.y))
-        self.design_canvas.bind('<B2-Motion>', lambda e: self.design_canvas.scan_dragto(e.x, e.y, gain=1))
-        self.design_canvas.bind('<Delete>', lambda e: self.delete_selected())
-        for key, dx, dy in [('Left', -1, 0), ('Right', 1, 0), ('Up', 0, 1), ('Down', 0, -1)]:
-            self.design_canvas.bind('<'+key+'>', lambda e, x=dx, y=dy: self.nudge_selected(x, y, bool(e.state & 1)))
-        bottom = ttk.Frame(center, padding=(6, 8)); bottom.pack(fill='x')
-        ttk.Checkbutton(bottom, text='NFC guide', variable=self.show_nfc_var, command=self.refresh_design_preview).pack(side='left')
-        ttk.Label(bottom, text='Snap mm', style='Muted.TLabel').pack(side='left', padx=(8, 4))
-        ttk.Entry(bottom, textvariable=self.snap_var, width=5).pack(side='left')
-        self._button(bottom, 'Fit', self.fit_canvas, 'search').pack(side='right')
-        ttk.Scale(bottom, from_=.6, to=2.5, variable=self.zoom_var, command=self._schedule_canvas, length=100).pack(side='right', padx=6)
-        self.canvas_hint = ttk.Label(center, text='Drag to move • Corner handles resize • Arrow keys nudge • Middle-drag pans', style='Muted.TLabel', wraplength=500)
-        self.canvas_hint.pack(anchor='w', pady=(0, 8))
-
-        palette = ttk.Frame(self, padding=(18, 10)); palette.pack(fill='x')
-        ttk.Label(palette, text='FILAMENTS', style='Step.TLabel').pack(side='left', padx=(0, 12))
-        self.color_buttons, self.filament_name_vars = [], []
-        for i in range(4):
-            v = tk.StringVar(); self.filament_name_vars.append(v)
-            b = tk.Button(palette, text=str(i+1), width=8, relief='flat', bd=0, padx=5, pady=6,
-                          command=lambda index=i: self.pick_filament_color(index))
-            b.pack(side='left', padx=(0, 5)); self.color_buttons.append(b)
-        self.background_button = tk.Button(palette, text='5  Background', relief='flat', bd=0, padx=8, pady=6, command=self.pick_face_background)
-        self.background_button.pack(side='left', padx=(6, 8))
-        self.mode_button = self._button(palette, 'Grayscale', self.grayscale_palette)
-        self.mode_button.pack(side='left')
-        self._button(palette, 'Reset colors', self.reset_filaments).pack(side='left', padx=4)
-        self._button(palette, 'Print checks', lambda: self.show_tool('checks'), 'check').pack(side='right')
-        self._button(palette, 'Face only', self.export_face_files, 'download').pack(side='right', padx=6)
-        self.progress = ttk.Progressbar(self, mode='indeterminate'); self.progress.pack(fill='x', padx=18)
-        ttk.Label(self, textvariable=self.status, padding=(18, 6), style='Muted.TLabel').pack(fill='x')
+        self.build_workspace()
 
         self.photo_window, self.source_tab = self._tool_window('Photo import & tracing', '1100x730')
         self._source_ui()
@@ -179,9 +71,11 @@ class StudioWorkspace:
         self.check_window, self.check_tab = self._tool_window('Printability checks', '850x650')
         self._check_ui()
         self.hf_preview_canvas = self.design_canvas
+        self.build_setup_panel()
+        self.set_phase('setup', commit=False)
 
     def _build_inspector(self, shell):
-        canvas = tk.Canvas(shell, width=276, bg='#eef2f6', highlightthickness=0)
+        canvas = tk.Canvas(shell, width=276, bg=theme.PANEL, highlightthickness=0)
         bar = ttk.Scrollbar(shell, orient='vertical', command=canvas.yview)
         bar.pack(side='right', fill='y'); canvas.pack(fill='both', expand=True)
         panel = ttk.Frame(canvas, padding=(8, 6, 10, 10))
@@ -203,11 +97,12 @@ class StudioWorkspace:
         self.inspector_vars = {k: tk.StringVar() for k in ('name', 'x', 'y', 'width', 'height', 'rotation')}
         self.aspect_var, self.visible_var = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
         self.image_gray_var = tk.BooleanVar(value=False)
-        self._inspect_field(self.inspector_content, 'Name', 'name', numeric=False)
+        self._inspect_field(self.inspector_content, 'Text / name', 'name', numeric=False)
         self._inspect_field(self.inspector_content, 'Center X · mm', 'x')
         self._inspect_field(self.inspector_content, 'Center Y · mm', 'y')
         ttk.Checkbutton(self.inspector_content, text='Visible in print', variable=self.visible_var, command=self.commit_selected).pack(anchor='w', pady=6)
         self.image_inspector = ttk.Frame(self.inspector_content)
+        self._button(self.image_inspector, 'Paint & refine image', self.open_image_workshop, 'sparkle', 'Accent.TButton').pack(fill='x', pady=4)
         ttk.Separator(self.image_inspector).pack(fill='x', pady=10)
         ttk.Label(self.image_inspector, text='SIZE & TRANSFORM', style='Step.TLabel').pack(anchor='w', pady=(0, 6))
         self._inspect_field(self.image_inspector, 'Width · mm', 'width')
@@ -224,11 +119,10 @@ class StudioWorkspace:
         row = ttk.Frame(self.image_inspector); row.pack(fill='x', pady=4)
         self._button(row, 'Flip H', lambda: self.flip_selected('flip_x'), 'flip').pack(side='left', expand=True, fill='x')
         self._button(row, 'Flip V', lambda: self.flip_selected('flip_y'), 'flip').pack(side='right', expand=True, fill='x', padx=(4, 0))
-        self._button(self.image_inspector, 'Center on card', self.center_selected, 'center').pack(fill='x', pady=4)
+        self._button(self.image_inspector, 'Center on object', self.center_selected, 'center').pack(fill='x', pady=4)
         ttk.Separator(self.image_inspector).pack(fill='x', pady=10)
         ttk.Label(self.image_inspector, text='IMAGE CLEANUP', style='Step.TLabel').pack(anchor='w', pady=(0, 6))
         self._field(self.image_inspector, 'Tolerance', self.bg_tolerance)
-        self._button(self.image_inspector, 'Paint & refine image', self.open_image_workshop, 'sparkle', 'Accent.TButton').pack(fill='x', pady=4)
         self._button(self.image_inspector, 'Remove background', self.clean_selected_background, 'sparkle').pack(fill='x', pady=4)
         self._button(self.image_inspector, 'Trim transparent edges', self.trim_selected, 'crop').pack(fill='x', pady=4)
         ttk.Checkbutton(self.image_inspector, text='Grayscale this image', variable=self.image_gray_var,
@@ -242,15 +136,16 @@ class StudioWorkspace:
         self._button(row, 'Original', lambda: self.tint_selected(None)).pack(side='right')
         self._button(self.image_inspector, 'Export image parts', self.export_logo_stl, 'download').pack(fill='x', pady=8)
         self.text_inspector = ttk.Frame(self.inspector_content)
-        self._button(self.text_inspector, 'Edit text & font', self.edit_selected_text, 'text', 'Accent.TButton').pack(fill='x', pady=10)
-        ttk.Label(panel, textvariable=self.inspector_error, foreground='#b42318', wraplength=240).pack(anchor='w', pady=8)
+        self.build_inline_text()
+        self.inspector_error_label = ttk.Label(panel, textvariable=self.inspector_error, foreground='#ffb4b4', wraplength=260)
+        self.inspector_error_label.pack(anchor='w', pady=8)
 
     def _inspect_field(self, parent, label, key, numeric=True):
         row = ttk.Frame(parent); row.pack(fill='x', pady=4)
         ttk.Label(row, text=label).pack(side='left')
         if numeric:
-            control = ttk.Spinbox(row, textvariable=self.inspector_vars[key], width=10, from_=-360, to=360,
-                                 increment=.5, command=lambda k=key: self.commit_selected(k))
+            control = ttk.Spinbox(row, textvariable=self.inspector_vars[key], width=10, from_=1 if key == 'size' else -360, to=144 if key == 'size' else 360,
+                                 increment=1 if key == 'size' else .5, command=lambda k=key: self.commit_selected(k))
         else:
             control = ttk.Entry(row, textvariable=self.inspector_vars[key], width=18)
         control.pack(side='right')
@@ -350,7 +245,7 @@ class StudioWorkspace:
                 self.selected_name_var.set('Select an image or text')
                 self.inspector_content.pack_forget()
                 return
-            self.inspector_content.pack(fill='x')
+            self.inspector_content.pack(fill='x', before=self.inspector_error_label)
             is_text = self.selected[0] == 'text'
             name = layer.text if is_text else layer.name
             self.selected_name_var.set('Text' if is_text else 'Image · '+name[:22])
@@ -358,6 +253,7 @@ class StudioWorkspace:
             self.visible_var.set(layer.enabled)
             self.image_inspector.pack_forget(); self.text_inspector.pack_forget()
             if is_text:
+                values.update(size=layer.size_pt, font=next((name for name, path in self.font_choices.items() if Path(path).name == Path(layer.font_path or default_font()).name), 'Custom font'))
                 self.text_inspector.pack(fill='x')
             else:
                 try: width, height = image_size_mm(layer)
@@ -400,6 +296,12 @@ class StudioWorkspace:
             updated.enabled = self.visible_var.get()
             if self.selected[0] == 'text':
                 updated.text = name
+                size = float(self.inspector_vars['size'].get())
+                if not math.isfinite(size) or not size.is_integer() or not 1 <= size <= 144: raise ValueError('Text size must be a whole number from 1 to 144 points.')
+                updated.size_pt = int(size)
+                font_name = self.inspector_vars['font'].get()
+                updated.font_path = self.font_choices.get(font_name, layer.font_path or default_font())
+                ImageFont.truetype(updated.font_path, updated.size_pt)
             else:
                 updated.name = name
                 width, height = float(self.inspector_vars['width'].get()), float(self.inspector_vars['height'].get())
@@ -456,11 +358,16 @@ class StudioWorkspace:
         self._edit_image(change)
 
     def open_image_workshop(self):
-        if self.busy or not self.commit_selected(): return
+        if not self.editing_ready() or not self.set_phase('design'): return
         layer = self.selected_layer()
         if layer is None or self.selected[0] == 'text': return
         from .paint import ImageWorkshop
+        self.photo_window.withdraw()
         self.image_workshop = ImageWorkshop(self, layer)
+        self.paint_host.grid(row=0, column=0, columnspan=3, sticky='nsew')
+        self.paint_host.tkraise()
+        self.palette_panel.pack_forget()
+        self.image_workshop.after_idle(self.image_workshop.fit)
 
     def center_selected(self):
         layer = self.selected_layer()
@@ -498,7 +405,7 @@ class StudioWorkspace:
         self._edit_image(trim)
 
     def load_elements(self):
-        if self.busy: return
+        if not self.set_phase('design'): return
         paths = filedialog.askopenfilenames(title='Add images — select one or more PNGs',
                     filetypes=[('Images', '*.png *.jpg *.jpeg *.webp *.bmp'), ('PNG', '*.png')])
         if not paths: return
@@ -562,7 +469,7 @@ class StudioWorkspace:
         self.commit_selected()
 
     def edit_selected_text(self):
-        if self.selected and self.selected[0] == 'text': self.text_dialog(self.selected[1])
+        if self.selected and self.selected[0] == 'text': self.set_phase('design')
 
     def duplicate_text(self):
         self.duplicate_selected()
@@ -599,6 +506,12 @@ class StudioWorkspace:
         ink = 'white' if sum(int(bg[k:k+2],16) for k in (1,3,5)) < 400 else '#203149'
         self.background_button.configure(bg=bg, fg=ink, activebackground=bg)
         self.mode_button.configure(text='Restore color' if self.project.editor.grayscale_artwork else 'Grayscale')
+        for i, b in enumerate(self.text_color_buttons):
+            color = effective_palette(self.project)[i]
+            ink = 'white' if sum(int(color[k:k+2], 16) for k in (1,3,5)) < 400 else '#111317'
+            b.configure(bg=color, fg=ink, activebackground=color)
+        self.sync_setup_fields()
+        self.refresh_export_report()
         self.refresh_layers(); self.sync_inspector(); self.refresh_ocr_status(); self.run_checks()
 
     def _schedule_canvas(self, event=None):
@@ -644,13 +557,13 @@ class StudioWorkspace:
         sw, sh = max(cw, vw+80), max(ch, vh+90)
         x0, y0 = (sw-vw)/2, (sh-vh)/2
         canvas.delete('all')
-        for x in range(16, sw, 24):
-            for y in range(16, sh, 24): canvas.create_oval(x, y, x+1, y+1, outline='#b7c7d7')
-        canvas.create_rectangle(x0+5, y0+7, x0+vw+5, y0+vh+7, fill='#bdcbd9', outline='')
+        canvas.backdrop_ref = ImageTk.PhotoImage(theme.studio_backdrop(sw, sh))
+        canvas.create_image(0, 0, anchor='nw', image=canvas.backdrop_ref)
+        canvas.create_rectangle(x0+5, y0+7, x0+vw+5, y0+vh+7, fill='#050608', outline='')
         photo = ImageTk.PhotoImage(im.resize((vw, vh), Image.Resampling.LANCZOS))
         canvas.create_image(x0, y0, anchor='nw', image=photo); canvas.image_ref = photo
         g = self.project.geometry
-        canvas.create_text(x0+vw/2, y0-20, text=f'{g.card_width_mm:g} × {g.card_height_mm:g} mm', fill='#50677f', font=('Segoe UI', 10))
+        canvas.create_text(x0+vw/2, y0-20, text=f'{g.card_width_mm:g} × {g.card_height_mm:g} mm', fill=theme.MUTED, font=('Segoe UI', 10))
         canvas.configure(scrollregion=(0, 0, sw, sh))
         self.canvas_views['design'] = dict(x0=x0, y0=y0, scale=vw/im.width, image_w=im.width, image_h=im.height, view_w=vw, view_h=vh)
         self.document_var.set(self.project.name + (' •' if asdict(self.project) != self._saved_data else ''))
@@ -680,8 +593,8 @@ class StudioWorkspace:
         return width, height, math.radians(layer.rotation_deg)
 
     def draw_editor_guides(self):
-        if self.object_preview_var.get(): return
         c = self.design_canvas; c.delete('guide')
+        if self.object_preview_var.get() or self.phase != 'design': return
         self.resize_handles = []
         v = self.canvas_views.get('design')
         if not v: return
@@ -699,23 +612,24 @@ class StudioWorkspace:
             x = layer.x_mm+dx*math.cos(angle)-dy*math.sin(angle)
             y = layer.y_mm+dx*math.sin(angle)+dy*math.cos(angle)
             points.append(self.card_mm_to_canvas(x, y))
-        c.create_polygon(*[z for p in points for z in p], outline='#008f9c', fill='', width=2, dash=(5, 2), tags='guide')
+        c.create_polygon(*[z for p in points for z in p], outline=theme.ACCENT, fill='', width=2, dash=(5, 2), tags='guide')
         if self.selected[0] != 'text':
             for x, y in points:
-                c.create_rectangle(x-5, y-5, x+5, y+5, fill='white', outline='#008f9c', width=2, tags='guide')
+                c.create_rectangle(x-5, y-5, x+5, y+5, fill=theme.BG, outline=theme.ACCENT, width=2, tags='guide')
                 self.resize_handles.append((x, y))
 
     def design_press(self, event):
         if self.busy: return
         if self.object_preview_var.get():
             self._object_drag=(event.x,event.y,self.object_yaw,self.object_pitch);return
+        if self.phase != 'design': return
         self.design_canvas.focus_set()
         p = self._event_mm(event)
         if p is None: return
         if self.logo_select_mode:
             self.logo_select_start = (p[0]/self.project.geometry.card_width_mm*1600,
                                       (1-p[1]/self.project.geometry.card_height_mm)*self.base_image().height)
-            self.logo_select_rect = self.design_canvas.create_rectangle(event.x, event.y, event.x, event.y, outline='#008f9c', width=2)
+            self.logo_select_rect = self.design_canvas.create_rectangle(event.x, event.y, event.x, event.y, outline=theme.ACCENT, width=2)
             return
         cx, cy = self.design_canvas.canvasx(event.x), self.design_canvas.canvasy(event.y)
         handle = any(abs(cx-x) <= 9 and abs(cy-y) <= 9 for x, y in self.resize_handles)
@@ -746,6 +660,7 @@ class StudioWorkspace:
             x,y,yaw,pitch=self._object_drag
             self.object_yaw=yaw+(event.x-x)*.5;self.object_pitch=pitch+(event.y-y)*.5
             self.draw_object_preview();return
+        if self.phase != 'design': return
         p = self._event_mm(event)
         if p is None or self.busy: return
         if self.logo_select_mode and self.logo_select_start:

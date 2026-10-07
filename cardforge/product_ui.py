@@ -7,10 +7,10 @@ import numpy as np
 from .core.products import KINDS, validate_product, build_product, load_model, model_surfaces, choose_surface
 
 
-def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_down=False):
+def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_down=False, background=None):
     """Software depth buffer: rear triangles never paint over nearer artwork."""
     from PIL import Image, ImageColor
-    if not parts: return Image.new('RGB',(width,height),'#dce4ed')
+    if not parts: return background.copy() if background is not None else Image.new('RGB',(width,height),'#dce4ed')
     ratio=min(1,800/width,600/height)
     rw,rh=max(100,round(width*ratio)),max(100,round(height*ratio))
     yaw,pitch=map(math.radians,(yaw,pitch))
@@ -21,7 +21,9 @@ def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_
     projected=(points-center)@rotation.T
     bounds=np.array([projected.min(0),projected.max(0)])
     scale=min((rw-60*ratio)/max(1,bounds[1,0]-bounds[0,0]),(rh-60*ratio)/max(1,bounds[1,1]-bounds[0,1]))
-    pixels=np.empty((rh,rw,3),dtype='uint8');pixels[:]=ImageColor.getrgb('#dce4ed')
+    if background is None:
+        pixels=np.empty((rh,rw,3),dtype='uint8');pixels[:]=ImageColor.getrgb('#dce4ed')
+    else: pixels=np.asarray(background.resize((rw,rh),Image.Resampling.LANCZOS)).copy()
     depth=np.full((rh,rw),-np.inf)
     for part in parts:
         mesh=part['mesh'];xyz=(mesh.vertices-center)@rotation.T
@@ -58,9 +60,10 @@ def draw_meshes(canvas, parts, yaw=30, pitch=55, highlighted=None, face_down=Fal
     canvas.delete('all')
     if not parts: return
     width,height=max(100,canvas.winfo_width()),max(100,canvas.winfo_height())
-    canvas.image_ref=ImageTk.PhotoImage(mesh_preview(parts,width,height,yaw,pitch,highlighted,face_down))
+    from .theme import studio_backdrop, MUTED
+    canvas.image_ref=ImageTk.PhotoImage(mesh_preview(parts,width,height,yaw,pitch,highlighted,face_down,studio_backdrop(width,height)))
     canvas.create_image(0,0,anchor='nw',image=canvas.image_ref)
-    canvas.create_text(12,12,anchor='nw',text='Assembly preview • drag to rotate',fill='#203149',font=('Segoe UI',10,'bold'))
+    canvas.create_text(12,12,anchor='nw',text='Assembly preview • drag to rotate',fill=MUTED,font=('Segoe UI',10,'bold'))
 
 
 class ProductControls:
@@ -99,66 +102,7 @@ class ProductControls:
         self._button(panel,'Close',win.destroy,'back').pack(side='bottom',anchor='e')
 
     def object_settings(self):
-        if self.busy: return
-        if self.project.product.kind=='nfc_card': self.show_tool('card');return
-        if not self.commit_selected(): return
-        candidate=copy.deepcopy(self.project)
-        win=tk.Toplevel(self);win.title('Object & lighting settings');win.geometry(f'480x{min(740,max(560,self.winfo_screenheight()-100))}');win.transient(self);win.grab_set()
-        footer=ttk.Frame(win,padding=12);footer.pack(side='bottom',fill='x')
-        self._button(footer,'Cancel',win.destroy,'back').pack(side='left')
-        panel=self._scroll_panel(win,expand=True)
-        ttk.Label(panel,text=KINDS[candidate.product.kind],style='Title.TLabel').pack(anchor='w',pady=10)
-        ttk.Label(panel,text='All measurements are in millimeters.',style='Muted.TLabel').pack(anchor='w')
-        values={}
-        numeric=[('Width','geometry','card_width_mm'),('Height','geometry','card_height_mm'),
-                 ('Corner radius','geometry','corner_radius_mm'),('Border','geometry','face_border_mm'),
-                 ('Panel thickness','face','thickness_mm'),('Front color depth','face','front_depth_mm'),
-                 ('Back thickness','product','backing_mm'),('Wall thickness','product','wall_mm'),('Fit per side','product','fit_mm')]
-        if candidate.product.kind=='lightbox': numeric=[n for n in numeric if n[2]!='face_border_mm']
-        if candidate.product.kind=='stl_panel':
-            numeric=[n for n in numeric if n[2] in ('thickness_mm','front_depth_mm')]+[('Attachment gap','product','surface_gap_mm')]
-        if candidate.product.kind=='lightbox':
-            numeric += [('Body depth','product','depth_mm'),('Strip width','product','led_width_mm'),
-                        ('Strip thickness','product','led_thickness_mm'),('Strip cut interval','product','led_cut_mm'),
-                        ('Strip front setback','product','led_setback_mm'),('Cable diameter','product','cable_diameter_mm')]
-        for label,section,key in numeric:
-            var=tk.StringVar(value=str(getattr(getattr(candidate,section),key)));values[(section,key)]=var
-            self._field(panel,label,var)
-        combos={}
-        options=[('Outline','outline',['rectangle','ellipse']),('Mounting','mounting',['desktop','wall','none'])]
-        if candidate.product.kind=='stl_panel': options=[]
-        if candidate.product.kind=='lightbox': options.append(('Cable exit','cable_side',['bottom','left','right']))
-        for label,key,choices in options:
-            ttk.Label(panel,text=label).pack(anchor='w',pady=(8,2))
-            var=tk.StringVar(value=getattr(candidate.product,key));combos[key]=var
-            ttk.Combobox(panel,textvariable=var,values=choices,state='readonly').pack(fill='x')
-        for label,key in [('Body / stand color','body_color'),('Diffuser color','diffuser_color')]:
-            if key=='diffuser_color' and candidate.product.kind!='lightbox': continue
-            def pick(k=key):
-                color=colorchooser.askcolor(initialcolor=getattr(candidate.product,k),parent=win)[1]
-                if color: setattr(candidate.product,k,color.upper())
-            self._button(panel,label,pick,'layers').pack(fill='x',pady=5)
-        if candidate.product.kind=='lightbox':
-            ttk.Label(panel,text='Lighting profile',style='Step.TLabel').pack(anchor='w',pady=(12,4))
-            profile=tk.StringVar(value=candidate.product.lighting_name)
-            ttk.Entry(panel,textvariable=profile).pack(fill='x')
-            self._button(panel,'Save lighting profile',lambda: self.save_lighting_profile(values,profile), 'save').pack(fill='x',pady=4)
-            self._button(panel,'Load lighting profile',lambda: self.load_lighting_profile(values,profile),'folder').pack(fill='x',pady=4)
-            ttk.Label(panel,text='Measure your strip and connector before printing. The model uses an open rear cable notch and adhesive strip placement along the inner walls.',wraplength=300,style='Muted.TLabel').pack(anchor='w',pady=8)
-        error=tk.StringVar();ttk.Label(footer,textvariable=error,foreground='#b42318',wraplength=210).pack(side='left',padx=8)
-        def apply():
-            try:
-                for (section,key),var in values.items(): setattr(getattr(candidate,section),key,float(var.get()))
-                for key,var in combos.items(): setattr(candidate.product,key,var.get())
-                if candidate.product.kind=='lightbox': candidate.product.lighting_name=profile.get().strip() or 'Custom dimensions — unverified'
-                if candidate.product.kind=='lightbox':
-                    candidate.geometry.face_border_mm=candidate.product.wall_mm
-                    candidate.geometry.face_clearance_mm=candidate.product.fit_mm
-                validate_product(candidate)
-            except (ValueError,tk.TclError) as exc: error.set(str(exc));return
-            self._remember();self.project=candidate;win.destroy()
-            self.sync_ui_from_project();self.refresh_design_preview();self.object_preview_parts=[]
-        self._button(footer,'Apply settings',apply,'check','Accent.TButton').pack(side='right')
+        self.set_phase('setup')
 
     def save_lighting_profile(self,values,name):
         import json
@@ -237,6 +181,7 @@ class ProductControls:
         populate()
 
     def show_object_preview(self):
+        if not self.editing_ready() or not self.commit_selected() or not self.commit_setup(): return
         if self.busy: return
         if self.object_preview_var.get():
             self.object_preview_var.set(False);self.refresh_design_preview();return

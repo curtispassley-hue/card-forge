@@ -49,7 +49,7 @@ NFC_PRESETS = {
 class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
     def __init__(self, recovery_enabled=True):
         super().__init__()
-        self.title(f"CardForge 4D {VERSION}")
+        self.title(f"CardForge Studio | {VERSION}")
         width=min(1440,max(1180,self.winfo_screenwidth()-80))
         height=min(900,max(660,self.winfo_screenheight()-100))
         self.geometry(f"{width}x{height}")
@@ -114,7 +114,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
     def _scroll_panel(self, parent, expand=False):
         shell = ttk.Frame(parent, width=340)
         shell.pack(side='left', fill='both' if expand else 'y', expand=expand, padx=(12 if expand else 0, 12))
-        canvas = tk.Canvas(shell, width=330, highlightthickness=0, bg='#f3f5f8')
+        canvas = tk.Canvas(shell, width=330, highlightthickness=0, bg='#1a1d23')
         bar = ttk.Scrollbar(shell, orient='vertical', command=canvas.yview)
         bar.pack(side='right', fill='y')
         canvas.pack(side='left', fill='both', expand=True)
@@ -154,12 +154,16 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self.status.set('Edit restored.')
 
     def undo(self):
+        if self.painting_active():
+            self.image_workshop.action(self.image_workshop.editor.undo); return
         if self.busy or self.grab_current() is not None or not self.undo_stack:
             return
         self.redo_stack.append(self._snapshot())
         self._restore(self.undo_stack.pop())
 
     def redo(self):
+        if self.painting_active():
+            self.image_workshop.action(self.image_workshop.editor.redo); return
         if self.busy or self.grab_current() is not None or not self.redo_stack:
             return
         self.undo_stack.append(self._snapshot())
@@ -250,19 +254,16 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
 
     # ---------- UI BUILD ----------
     def _build_menu(self):
-        menu = tk.Menu(self)
-        fm = tk.Menu(menu, tearoff=False)
-        fm.add_command(label="New", command=self.new_project)
-        fm.add_command(label="Open Project...", command=self.open_project)
-        fm.add_command(label="Save Project...", command=self.save_project)
-        fm.add_separator()
-        fm.add_command(label="Exit", command=self.close_project)
-        menu.add_cascade(label="File", menu=fm)
-        help_menu = tk.Menu(menu, tearoff=False)
-        help_menu.add_command(label='Quick start / About', command=self.show_help)
-        menu.add_cascade(label='Help', menu=help_menu)
-        self.config(menu=menu)
-
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label='New project', command=self.new_project)
+        menu.add_command(label='Open project…', command=self.open_project)
+        menu.add_command(label='Save project…', command=self.save_project)
+        menu.add_separator()
+        menu.add_command(label='License & support', command=self.license_dialog)
+        menu.add_command(label='Quick start / About', command=self.show_help)
+        menu.add_separator()
+        menu.add_command(label='Exit', command=self.close_project)
+        self.app_menu = menu
 
     def _assembly_ui(self):
         left = self._scroll_panel(self.assembly_tab)
@@ -543,90 +544,12 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self.apply_logo()
 
     def add_text(self):
-        self.text_dialog(None)
-
+        self.add_inline_text()
 
     def text_dialog(self, index):
-        if self.busy:
-            return
-        win = tk.Toplevel(self)
-        win.title('Edit text' if index is not None else 'Add text')
-        win.geometry('560x570')
-        win.resizable(False, False)
-        win.transient(self)
-        win.grab_set()
-        layer = copy.deepcopy(self.project.texts[index]) if index is not None else TextLayer(size_pt=10)
-        panel = ttk.Frame(win, padding=20); panel.pack(fill='both', expand=True)
-        ttk.Label(panel, text='Make your words stand out.', font=('Segoe UI', 17, 'bold')).pack(anchor='w', pady=(0, 12))
-        value = tk.StringVar(value=layer.text)
-        font_path = tk.StringVar(value=layer.font_path or default_font())
-        size = tk.IntVar(value=layer.size_pt)
-        x, y = tk.DoubleVar(value=layer.x_mm), tk.DoubleVar(value=layer.y_mm)
-        enabled = tk.BooleanVar(value=layer.enabled)
-        ttk.Label(panel, text='Text').pack(anchor='w')
-        entry = ttk.Entry(panel, textvariable=value, font=('Segoe UI', 12))
-        entry.pack(fill='x', pady=(4, 12)); entry.focus_set()
-        choices = bundled_fonts()
-        current_name = next((n for n, path in choices.items() if Path(path).name == Path(font_path.get()).name), 'Custom font')
-        chosen = tk.StringVar(value=current_name)
-        ttk.Label(panel, text=f'Font — {len(choices)} included styles').pack(anchor='w')
-        row = ttk.Frame(panel); row.pack(fill='x', pady=(4, 10))
-        picker = ttk.Combobox(row, values=list(choices), state='readonly', textvariable=chosen)
-        picker.pack(side='left', fill='x', expand=True)
-        picker.bind('<<ComboboxSelected>>', lambda e: font_path.set(choices[chosen.get()]))
-        def custom_font():
-            self.pick_font(font_path)
-            chosen.set(Path(font_path.get()).stem)
-        self._button(row, 'Browse', custom_font, 'folder').pack(side='right', padx=(6, 0))
-        self._field(panel, 'Size (points)', size)
-        self._field(panel, 'Center X (mm)', x)
-        self._field(panel, 'Center Y (mm)', y)
-        ttk.Label(panel, text='Filament color').pack(anchor='w', pady=(10, 4))
-        palette = effective_palette(self.project)
-        slot = tk.IntVar(value=layer.filament_slot if layer.filament_slot is not None else nearest_slot(layer.color, self.project.hueforge.mapping_palette))
-        row = ttk.Frame(panel); row.pack(fill='x')
-        for i, color in enumerate(palette):
-            tk.Radiobutton(row, text=str(i+1), value=i, variable=slot, bg=color, selectcolor=color,
-                           fg='white' if sum(int(color[k:k+2], 16) for k in (1, 3, 5)) < 400 else '#111111',
-                           indicatoron=False, width=8, relief='raised', borderwidth=2, padx=4, pady=7).pack(side='left', padx=(0, 5))
-        sample = ttk.Label(panel); sample.pack(fill='x', pady=12)
-        error = tk.StringVar()
-        ttk.Label(panel, textvariable=error, foreground='#b42318', wraplength=500).pack(anchor='w')
-        def preview(*_):
-            try:
-                font = ImageFont.truetype(font_path.get(), min(60, max(8, int(size.get())*2)))
-                im = Image.new('RGB', (510, 72), 'white')
-                ImageDraw.Draw(im).text((12, 36), value.get() or 'Sample Aa 123', font=font, fill=palette[slot.get()], anchor='lm')
-                sample.photo = ImageTk.PhotoImage(im); sample.configure(image=sample.photo)
-            except (ValueError, OSError, tk.TclError):
-                pass
-        for var in (value, font_path, size, slot): var.trace_add('write', preview)
-        preview()
-        ttk.Checkbutton(panel, text='Include this text in the print', variable=enabled).pack(anchor='w')
-        def save():
-            try:
-                xx, yy, ss = float(x.get()), float(y.get()), int(size.get())
-                if not value.get().strip(): raise ValueError('Enter some text first.')
-                if not all(math.isfinite(n) for n in (xx, yy)) or not 1 <= ss <= 144:
-                    raise ValueError('Use a size of 1–144 points and valid positions.')
-                if not (0 <= xx <= self.project.geometry.card_width_mm and 0 <= yy <= self.project.geometry.card_height_mm):
-                    raise ValueError('Place the text center within the card.')
-                ImageFont.truetype(font_path.get(), ss)
-            except (ValueError, OSError, tk.TclError) as exc:
-                error.set(str(exc)); return
-            layer.text, layer.x_mm, layer.y_mm, layer.size_pt = value.get(), xx, yy, ss
-            layer.filament_slot = slot.get()
-            layer.font_path, layer.color, layer.enabled = font_path.get(), palette[slot.get()], enabled.get()
-            self._remember()
-            if index is None: self.project.texts.append(layer)
-            else: self.project.texts[index] = layer
-            win.destroy()
-            self.refresh_design_preview()
-            self.select_layer('text', index if index is not None else len(self.project.texts)-1)
-        footer = ttk.Frame(panel); footer.pack(side='bottom', fill='x', pady=(8, 0))
-        self._button(footer, 'Cancel', win.destroy, 'back').pack(side='left')
-        self._button(footer, 'Apply text', save, 'check', 'Accent.TButton').pack(side='right')
-        win.bind('<Escape>', lambda e: win.destroy())
+        # Legacy callers now enter the contextual text inspector.
+        if index is None: self.add_inline_text()
+        elif self.set_phase('design'): self.select_layer('text', index)
 
     def pick_font(self, var):
         p = filedialog.askopenfilename(filetypes=[("Fonts", "*.ttf *.otf"), ("All files", "*.*")])
@@ -837,41 +760,10 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self._export_direct(False)
 
     def export_logo_stl(self):
-        """Create a standalone logo package without rebuilding the card base."""
-        if self.busy:
-            return
-        if not self.export_allowed(): return
-        if not any(e.path and e.enabled for e in [self.project.logo, *self.project.elements]):
-            messagebox.showinfo('CardForge', 'Add an image or load a logo first.')
-            return
-        self._sync_edits()
-        settings = self._output_settings('Export image geometry')
-        if not settings:
-            return
-        out, name = settings
-        snapshot = copy.deepcopy(self.project)
-        self._background(
-            'Creating logo geometry…',
-            lambda: export_logo(snapshot, out, output_name=name),
-            lambda result: messagebox.showinfo(
-                'CardForge',
-                f'Logo files ready in:\n{result}\n\n'
-                'Open the Logo.3mf file for named color parts, or use Logo_STLs together as one multipart object.'
-            ),
-        )
+        self.show_export('Images only')
 
     def _export_direct(self, include_base):
-        if self.busy:
-            return
-        if not self.export_allowed(): return
-        self._sync_edits()
-        settings = self._output_settings('Export object' if include_base else 'Export artwork panel')
-        if not settings:
-            return
-        out, name = settings
-        snapshot = copy.deepcopy(self.project)
-        self._background('Generating flush face geometry…', lambda: export_product(snapshot, out, output_name=name) if include_base else export_face(snapshot, out, False, output_name=name),
-                         lambda result: messagebox.showinfo('CardForge', f'Files ready in:\n{result}\n\nRead the included assembly/print guide and assign filaments to the named artwork parts in Bambu Studio.'))
+        self.show_export('Complete object' if include_base else 'Artwork panel only')
 
     def browse_output_folder(self):
         current = self.output_dir_var.get().strip()
@@ -879,48 +771,6 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
                                         initialdir=current if Path(current).is_dir() else None)
         if folder:
             self.output_dir_var.set(folder)
-
-    def _output_settings(self, title):
-        from .core.face import _safe_stem
-        win = tk.Toplevel(self)
-        win.title(title)
-        win.resizable(False, False)
-        win.transient(self)
-        win.grab_set()
-        panel = ttk.Frame(win, padding=22); panel.pack(fill='both', expand=True)
-        ttk.Label(panel, text=title, font=('Segoe UI', 17, 'bold')).pack(anchor='w', pady=(0, 12))
-        self._field(panel, 'Package name', self.output_name_var)
-        ttk.Label(panel, text='Destination folder').pack(anchor='w', pady=(10, 4))
-        row = ttk.Frame(panel); row.pack(fill='x')
-        ttk.Entry(row, textvariable=self.output_dir_var, width=50).pack(side='left', fill='x', expand=True)
-        self._button(row, 'Browse', self.browse_output_folder, 'folder').pack(side='left', padx=(6, 0))
-        ttk.Label(panel, text='A new folder with this name will contain the 3MF, STL parts and instructions.\nIf it already exists, a numbered suffix keeps your earlier files safe.',
-                  wraplength=510, style='Muted.TLabel').pack(anchor='w', pady=14)
-        error = tk.StringVar()
-        ttk.Label(panel, textvariable=error, foreground='#b42318', wraplength=510).pack(anchor='w')
-        result = []
-        def accept():
-            name = self.output_name_var.get().strip()
-            folder = self.output_dir_var.get().strip()
-            if not name:
-                error.set('Enter a package name.'); return
-            if not folder:
-                error.set('Choose a destination folder.'); return
-            path = Path(folder).expanduser()
-            if not path.is_dir():
-                error.set('Choose an existing destination folder with Browse.'); return
-            safe = _safe_stem(name)
-            self.output_name_var.set(safe)
-            self.output_dir_var.set(str(path))
-            result.append((str(path), safe))
-            win.destroy()
-        footer = ttk.Frame(panel); footer.pack(fill='x', pady=(14, 0))
-        self._button(footer, 'Cancel', win.destroy, 'back').pack(side='left')
-        self._button(footer, 'Export files', accept, 'download', 'Accent.TButton').pack(side='right')
-        win.bind('<Escape>', lambda e: win.destroy())
-        win.bind('<Return>', lambda e: accept())
-        self.wait_window(win)
-        return result[0] if result else None
 
     def import_flatforge_folder(self):
         folder = filedialog.askdirectory(title="Select FlatForge STL folder")
@@ -1175,7 +1025,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         warnings.append('Use matching first-layer / layer heights that divide the front depth. Inspect fine lettering in the slicer before printing.')
 
         text = "CARDFORGE 4D PRINTABILITY REPORT\n\n"
-        text += "PASS\n" + ("\n".join("âœ“ " + x for x in ok) if ok else "None") + "\n\n"
+        text += "PASS\n" + ("\n".join("✓ " + x for x in ok) if ok else "None") + "\n\n"
         text += "WARNINGS\n" + ("\n".join("! " + x for x in warnings) if warnings else "None") + "\n\n"
         text += "BLOCKING ISSUES\n" + ("\n".join("X " + x for x in issues) if issues else "None detected by current checks.")
         self.check_text.delete("1.0", tk.END)
@@ -1183,6 +1033,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
 
 
     def start_template(self, name):
+        if not self.editing_ready(): return
         if self.busy:
             return
         self.selected = None
@@ -1195,12 +1046,13 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self.sync_ui_from_project()
         self.show_source_original()
         self.refresh_design_preview()
-        self.status.set(name+' ready. Add your logo and double-click any text to edit. Undo restores the previous card.')
+        self.status.set(name+' ready. Choose Design to add images and edit text. Undo restores the previous card.')
 
     def new_project(self):
         self.start_template('Blank card')
 
     def _sync_edits(self):
+        if not self.commit_setup(): raise ValueError(self.setup_error.get())
         self.apply_logo()
         if not self.commit_selected():
             raise ValueError(self.inspector_error.get())
@@ -1210,6 +1062,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         self.project.editor.show_nfc_guide = self.show_nfc_var.get()
 
     def save_project(self):
+        if not self.editing_ready(): return False
         if self.busy:
             return False
         self._sync_edits()
@@ -1225,6 +1078,9 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         return True
 
     def close_project(self):
+        if self.painting_active():
+            if not messagebox.askyesno('Unfinished image edits', 'Discard the pending painting edits and close the project?', parent=self): return
+            self.image_workshop.cancel()
         if self.grab_current() is not None:
             self.grab_current().lift();return
         if self.busy:
@@ -1266,6 +1122,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
             self.after(60000,self.autosave)
 
     def open_project(self):
+        if not self.editing_ready(): return
         if self.busy:
             return
         path = filedialog.askopenfilename(filetypes=[('CardForge Project', '*.cardforge *.cardforge.json *.json')])
@@ -1300,13 +1157,13 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
             'Save a .cardforge project to keep your editable design, fonts and images together.\n\n'
             'Choose the package name and destination each time you export. The canvas, layers, palette and inspector share one workspace.\n\n'
             'Ctrl+S Save   Ctrl+O Open   Ctrl+Z Undo   Ctrl+Y Redo\n'
-            'This preview release still needs a slicer review and physical test print for each design.')
+            'Use Set up object for dimensions, Design for editing and Export for named print packages.\nThis preview release still needs a slicer review and physical test print for each design.')
 
 
 def _undoable(method):
     @wraps(method)
     def call(self, *args, **kwargs):
-        if self.busy:
+        if self.busy or self.painting_active():
             return
         outer = self._action_depth == 0
         before = self._snapshot() if outer else None
