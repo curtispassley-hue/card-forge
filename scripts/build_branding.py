@@ -7,11 +7,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from cardforge.icons import icon_image
+from cardforge.licensing import read_config
 
 
 def main():
     assets = ROOT/'cardforge/assets'
     assets.mkdir(exist_ok=True)
+    # Compile only public edition/issuer settings into the frozen application.
+    config=read_config()
+    (ROOT/'cardforge/_build_edition.py').write_text('# Generated public build configuration; contains no private keys.\nCONFIG = '+repr(config)+'\n',encoding='utf-8')
     icon_image('app', size=256).save(assets/'CardForge.ico', sizes=[(16,16), (24,24), (32,32), (48,48), (64,64), (128,128), (256,256)])
     (assets/'windows-version.txt').write_text('''VSVersionInfo(
   ffi=FixedFileInfo(filevers=(1,0,0,0), prodvers=(1,0,0,0), mask=0x3f, flags=2, OS=0x40004, fileType=1, subtype=0, date=(0,0)),

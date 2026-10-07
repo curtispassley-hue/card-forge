@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import platform
+import sys
+from copy import deepcopy
 import uuid
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
@@ -34,8 +36,12 @@ def device_code():
 
 
 def read_config():
-    path=Path(__file__).parent/'assets'/'commercial.json'
-    config=json.loads(path.read_text(encoding='utf-8'))
+    if getattr(sys,'frozen',False):
+        from ._build_edition import CONFIG
+        config=deepcopy(CONFIG)
+    else:
+        path=Path(__file__).parent/'assets'/'commercial.json'
+        config=json.loads(path.read_text(encoding='utf-8'))
     if config.get('edition') not in ('preview','commercial'): raise ValueError('Invalid edition configuration.')
     if config['edition']=='commercial' and not config.get('public_keys'): raise ValueError('Commercial build has no trusted license issuer.')
     return config

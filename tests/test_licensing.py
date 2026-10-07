@@ -53,4 +53,18 @@ class LicenseTests(unittest.TestCase):
             self.assertEqual((root/'license.json').read_bytes(),previous)
 
 
+class FrozenEditionTests(unittest.TestCase):
+    def test_frozen_edition_is_compiled_and_returns_a_copy(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from cardforge.licensing import read_config
+        original={'edition':'commercial','public_keys':{'trusted':'key'}}
+        with patch.object(sys,'frozen',True,create=True),patch.dict(sys.modules,{'cardforge._build_edition':SimpleNamespace(CONFIG=original)}):
+            config=read_config()
+            config['edition']='preview';config['public_keys'].clear()
+            self.assertEqual(read_config(),original)
+            self.assertEqual(original['edition'],'commercial')
+
+
 if __name__=='__main__': unittest.main()

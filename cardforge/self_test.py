@@ -13,6 +13,23 @@ def run():
     import trimesh
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
+        # Verify the actual crypto backend in the frozen executable, using only
+        # temporary test keys and state, never a publisher or customer license.
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+        from cardforge.licensing import canonical, PRODUCT_ID, activate_license, license_status
+        key=Ed25519PrivateKey.generate()
+        public=base64.b64encode(key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw)).decode()
+        config={'edition':'commercial','public_keys':{'test':public}}
+        device='a'*32
+        payload={'version':1,'product':PRODUCT_ID,'type':'perpetual','license_id':'self-test','customer':'Runtime self-test','device':device,'major_versions':[1]}
+        document={'payload':payload,'key_id':'test','signature':base64.b64encode(key.sign(canonical(payload))).decode()}
+        import json
+        license_file=td/'test-license.json';license_file.write_text(json.dumps(document),encoding='utf-8')
+        activate_license(license_file,config,td/'license-state',device)
+        assert license_status(config,td/'license-state',device)['active']
+        assert not license_status(config,td/'license-state','b'*32)['active']
         p = Project()
         base = build_nfc_base(p.geometry, p.nfc)
         assert base.is_watertight and base.is_winding_consistent and base.volume > 0
@@ -291,4 +308,4 @@ def run():
         app.recovery_enabled=False
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'named_export_dialog': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

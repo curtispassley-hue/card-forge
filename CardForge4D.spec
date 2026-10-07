@@ -15,6 +15,7 @@ for pkg in ("cv2", "PIL", "shapely", "trimesh", "lxml", "rapidocr", "onnxruntime
     datas += d; binaries += b; hiddenimports += h
 
 hiddenimports += [
+    "cardforge._build_edition",
     "onnxruntime.capi._pybind_state",
     "onnxruntime.capi.onnxruntime_pybind11_state",
 ]

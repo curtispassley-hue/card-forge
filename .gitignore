@@ -13,3 +13,5 @@ cardforge/assets/fonts/
 cardforge/assets/notices/
 cardforge/assets/CardForge.ico
 cardforge/assets/windows-version.txt
+
+cardforge/_build_edition.py

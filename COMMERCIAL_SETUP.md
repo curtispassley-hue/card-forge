@@ -14,7 +14,7 @@ Create an issuer using the source environment (replace example paths and publish
 python scripts/license_admin.py create-issuer --private-key C:/CardForgeSecrets/issuer.pem --public-config C:/CardForgeSecrets/commercial-public.json --publisher "YOUR LEGAL PUBLISHER" --support-email curtispasley@gmail.com
 ```
 
-The tool prompts for a private-key password of at least 12 characters. Copy only `commercial-public.json` over `cardforge/assets/commercial.json` in the intended commercial build. Retain trusted older public keys if rotating issuers. Build and test that configuration before distributing it.
+The tool prompts for a private-key password of at least 12 characters. Copy only `commercial-public.json` over `cardforge/assets/commercial.json` in the intended commercial build. Retain trusted older public keys if rotating issuers. Build and test that configuration before distributing it. The packaging step embeds these public settings into the executable; editing a JSON file beside an installed app does not change its edition or trusted issuer keys.
 
 After verifying an actual purchase, ask the customer for the device code from **License > Copy device code**, then issue a license:
 
