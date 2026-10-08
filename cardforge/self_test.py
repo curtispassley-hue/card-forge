@@ -320,6 +320,23 @@ def run():
             deadline=time.monotonic()+30
             while app.object_renderer.busy and time.monotonic()<deadline:app.update();time.sleep(.01)
             assert app.object_preview_var.get() and not app.object_renderer.last_error
+        # Continuous drag must display intermediate frames instead of starving renders.
+        def slow_frame(parts,width,height,*args,**kwargs):
+            time.sleep(.04)
+            return Image.new('RGB',(width,height),'#202630')
+        with patch('cardforge.product_ui.mesh_preview',side_effect=slow_frame), \
+             patch.object(app.design_canvas,'create_image',wraps=app.design_canvas.create_image) as frames:
+            deadline=time.monotonic()+1
+            while time.monotonic()<deadline:
+                app.object_yaw+=1;app.draw_object_preview(interactive=True)
+                app.update();time.sleep(.005)
+            assert frames.call_count>=2, 'Continuous dragging must show completed frames'
+            deadline=time.monotonic()+5
+            while app.object_renderer.busy and time.monotonic()<deadline:app.update();time.sleep(.01)
+        app.draw_object_preview()
+        deadline=time.monotonic()+30
+        while app.object_renderer.busy and time.monotonic()<deadline:app.update();time.sleep(.01)
+        assert not app.object_renderer.last_error
         app.show_object_preview()
         with patch('cardforge.gui.messagebox.showinfo',side_effect=lambda *a, **kw: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror',side_effect=lambda *a, **kw: errors.append(a)):
@@ -360,4 +377,4 @@ def run():
         app.recovery_enabled=False
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'repeated_export_without_restart':True, 'export_failure_recovery':True, 'body_only_export':True, 'illustrated_assembly_guides':True, 'cached_async_3d_preview':True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'inline_named_export': True, 'dark_studio_phases': True, 'inline_painting': True, 'contextual_text_editor': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'repeated_export_without_restart':True, 'export_failure_recovery':True, 'body_only_export':True, 'illustrated_assembly_guides':True, 'cached_async_3d_preview':True, 'continuous_rotation_frames':True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'inline_named_export': True, 'dark_studio_phases': True, 'inline_painting': True, 'contextual_text_editor': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
