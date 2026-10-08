@@ -21,6 +21,32 @@ def islands():
 
 
 class PaintTests(unittest.TestCase):
+    def test_adjacent_regions_remain_independent_after_matching_filaments(self):
+        im=Image.new('RGBA',(40,20),'#D92D20');ImageDraw.Draw(im).rectangle((20,0,39,19),fill='#0044AA')
+        e=PixelEditor(im);palette=['#111111','#00FF00','#111111','#FFFFFF']
+        e.select_region((5,5),0,True,palette);e.fill(slot=1)
+        e.select_region((25,5),0,True,palette);e.fill(slot=1)
+        # No clear-selection step. Matching displayed color must not join regions.
+        e.select_region((25,5),0,True,palette)
+        self.assertEqual(e.selection.sum(),400)
+        e.fill(slot=4)
+        self.assertEqual(e.slots.getpixel((5,5)),1)
+        self.assertEqual(e.slots.getpixel((25,5)),4)
+        e.undo();self.assertEqual(e.slots.getpixel((25,5)),1)
+        e.select_region((5,5),0,True,palette,source='display')
+        self.assertEqual(e.selection.sum(),800)  # Explicit displayed-color mode.
+
+    def test_outline_preserves_selected_interior_color_and_modifiers(self):
+        from cardforge.core.painting import selection_outline
+        e=PixelEditor(islands());e.select_region((10,10),0)
+        e.select_region((55,10),0,operation='add');self.assertEqual(e.selection.sum(),1200)
+        e.select_region((10,10),0,operation='subtract');self.assertEqual(e.selection.sum(),600)
+        e.select_region((10,10),0);self.assertFalse(e.selection[10,55])
+        e.fill(slot=2);preview=e.preview(['#111111','#F4C430','#D92D20','#FFFFFF'])
+        outlined=selection_outline(preview,e.selection)
+        self.assertEqual(outlined.getpixel((10,10)),preview.getpixel((10,10)))
+        self.assertIn(outlined.getpixel((5,5)),[(0,0,0,255),(255,255,255,255)])
+
     def test_connected_selection_paints_one_element_and_undo_restores(self):
         e = PixelEditor(islands())
         e.select_region((10,10),0,True)

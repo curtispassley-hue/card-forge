@@ -224,7 +224,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
             if hasattr(self, 'logo_file_var'):
                 self.logo_file_var.set(f'Could not preview logo: {exc}')
 
-    def _background(self, label, work, done):
+    def _background(self, label, work, done, failed=None):
         if self.busy:
             return
         self.busy = True
@@ -247,6 +247,8 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
             self.status.set('Operation complete.' if ok else 'Operation failed; see the error message.')
             if ok:
                 done(result)
+            elif failed:
+                failed(result)
             else:
                 messagebox.showerror('CardForge', result)
         threading.Thread(target=worker, daemon=True).start()
@@ -259,6 +261,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
         menu.add_command(label='Open project…', command=self.open_project)
         menu.add_command(label='Save project…', command=self.save_project)
         menu.add_separator()
+        menu.add_command(label='Updates / uninstall', command=self.manage_installation)
         menu.add_command(label='License & support', command=self.license_dialog)
         menu.add_command(label='Quick start / About', command=self.show_help)
         menu.add_separator()
@@ -1093,6 +1096,7 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
                 return
         self.clear_recovery()
         self.destroy()
+        return True
 
     def recovery_path(self):
         from .licensing import state_dir
@@ -1144,6 +1148,23 @@ class CardForgeApp(ProductControls, StudioWorkspace, tk.Tk):
             self.project, self.flatforge_meshes = before
             self.sync_ui_from_project()
             messagebox.showerror('CardForge', f'Could not open project: {exc}')
+
+    def manage_installation(self):
+        import os,sys
+        win=tk.Toplevel(self);win.title('Updates & uninstall');win.geometry('620x390');win.transient(self)
+        panel=ttk.Frame(win,padding=22);panel.pack(fill='both',expand=True)
+        ttk.Label(panel,text='Keep one installed version',style='Title.TLabel').pack(anchor='w',pady=(0,12))
+        ttk.Label(panel,text='Run the latest CardForge Studio installer to update the existing installation. It reuses the same app entry and preserves saved projects. Close CardForge first if prompted. Portable ZIP copies are separate folders; keep your projects before removing an older folder manually.',wraplength=565,style='Muted.TLabel').pack(anchor='w',pady=8)
+        uninstall=Path(sys.executable).parent/'unins000.exe'
+        if getattr(sys,'frozen',False) and uninstall.exists():
+            def launch():
+                if messagebox.askyesno('Uninstall CardForge Studio?', 'Close this app and start its uninstaller? Saved projects outside the application folder remain available.',parent=win):
+                    win.destroy()
+                    if self.close_project(): os.startfile(str(uninstall))
+            self._button(panel,'Uninstall this installed version',launch,'delete').pack(fill='x',pady=8)
+        self._button(panel,'Open Windows installed apps',lambda:os.startfile('ms-settings:appsfeatures'),'settings').pack(fill='x',pady=8)
+        ttk.Label(panel,text='Installed versions also include an Uninstall shortcut in the Start menu. An old portable ZIP has no registered uninstaller.',wraplength=565,style='Muted.TLabel').pack(anchor='w',pady=8)
+        self._button(panel,'Close',win.destroy,'back').pack(side='bottom',anchor='e')
 
     def show_help(self):
         messagebox.showinfo('CardForge 4D '+VERSION,

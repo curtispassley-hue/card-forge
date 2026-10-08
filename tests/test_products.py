@@ -9,6 +9,65 @@ from cardforge.core.products import build_product, export_product, load_model, m
 
 
 class ProductTests(unittest.TestCase):
+    def test_structure_export_never_builds_artwork_and_keeps_required_parts(self):
+        from unittest.mock import patch
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            for template, expected in [('Blank card',{'NFC base'}),('Wall art',{'Plaque backing'}),
+                                       ('Desktop lightbox',{'Lightbox shell','Removable back','Desktop cradle','Fit coupon socket','Fit coupon insert'})]:
+                p=create_template(template)
+                with patch('cardforge.core.face.build_face',side_effect=AssertionError('Art geometry must not be built')):
+                    out=export_product(p,td,template,scope='structure')
+                manifest=json.loads((out/'Parts.json').read_text(encoding='utf-8'))
+                self.assertEqual({x['name'] for x in manifest},expected)
+                self.assertFalse(list((out/'Print_Parts').glob('*Artwork*')))
+                self.assertEqual(len(list((out/'Print_Parts').glob('*.stl'))),len(expected))
+                self.assertTrue((out/'ASSEMBLY_GUIDE.html').exists())
+                for path in (out/'Print_Parts').glob('*.stl'):
+                    mesh=trimesh.load_mesh(path);self.assertAlmostEqual(mesh.bounds[0,2],0,places=5)
+
+    def test_artwork_scope_and_illustrated_guide_match_project(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            p=create_template('Desktop lightbox');p.name='<script>unsafe</script>'
+            with patch('cardforge.core.products.build_product',side_effect=AssertionError('Body must not be built')):
+                out=export_product(p,td,'Front',scope='artwork')
+            self.assertTrue((out/'Front_Face.3mf').exists())
+            self.assertFalse((out/'Print_Parts').exists())
+            html=(out/'ASSEMBLY_GUIDE.html').read_text(encoding='utf-8')
+            self.assertIn('<svg',html);self.assertIn('LED strip inside walls',html)
+            self.assertNotIn('<script>',html);self.assertIn('&lt;script&gt;',html)
+            self.assertIn('Artwork panel only',html)
+            p=create_template('Wall art');out=export_product(p,td,'PlaqueGuide')
+            guide=(out/'ASSEMBLY_GUIDE.txt').read_text(encoding='utf-8')
+            self.assertIn('plaque backing',guide.lower())
+            self.assertNotIn('Strip width',guide)
+
+    def test_imported_body_only_export_preserves_model_without_artwork(self):
+        from unittest.mock import patch
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            file=Path(td)/'solid.stl'
+            trimesh.creation.box(extents=(70,50,20)).export(file)
+            p=Project();choose_surface(p,file,'mm',0)
+            with patch('cardforge.core.face.build_face',side_effect=AssertionError('No artwork')):
+                out=export_product(p,td,'SolidOnly',scope='structure')
+            manifest=json.loads((out/'Parts.json').read_text(encoding='utf-8'))
+            self.assertEqual([x['name'] for x in manifest],['Imported model'])
+            printed=trimesh.load_mesh(out/'Print_Parts'/'01_Imported_model.stl')
+            np.testing.assert_allclose(printed.extents,[70,50,20])
+            self.assertTrue(printed.is_watertight)
+            self.assertIn('selected flat surface',(out/'ASSEMBLY_GUIDE.txt').read_text(encoding='utf-8'))
+
+    def test_preview_cancellation_preserves_export_meshes(self):
+        from cardforge.product_ui import mesh_preview
+        p=create_template('Desktop lightbox');parts,_=build_product(p)
+        vertices=parts[0]['mesh'].vertices.copy()
+        self.assertIsNone(mesh_preview(parts,600,400,cancelled=lambda:True))
+        image=mesh_preview(parts,600,400,max_size=(360,240))
+        self.assertEqual(image.size,(600,400))
+        np.testing.assert_array_equal(vertices,parts[0]['mesh'].vertices)
+
     def test_lightbox_solids_do_not_overlap_and_lid_is_printable(self):
         with tempfile.TemporaryDirectory() as td:
             p=create_template('Desktop lightbox')

@@ -222,7 +222,26 @@ def run():
                 app.update()
                 ticks += 1
                 time.sleep(0.01)
-            assert not app.busy and ticks > 1 and notices, (ticks, notices, errors)
+            assert not app.busy and ticks > 1 and app.export_completion.get(), (ticks, errors)
+        # Export a second package in the same session, then recover from a worker
+        # failure without a restart or a lingering input grab.
+        assert app.grab_current() is None
+        choose_output('SampleFace')
+        deadline=time.monotonic()+30
+        while app.busy and time.monotonic()<deadline: app.update();time.sleep(.01)
+        assert not app.busy and (target/'SampleFace_2'/'SampleFace_Face.3mf').exists()
+        app.export_mode.set('Body / base parts only')
+        with patch('cardforge.core.products.export_product',side_effect=ValueError('Test export failure')):
+            choose_output('Failure')
+            deadline=time.monotonic()+30
+            while app.busy and time.monotonic()<deadline: app.update();time.sleep(.01)
+            assert not app.busy and 'Test export failure' in app.export_error.get()
+        choose_output('CardBody')
+        deadline=time.monotonic()+30
+        while app.busy and time.monotonic()<deadline: app.update();time.sleep(.01)
+        assert not app.busy and (target/'CardBody'/'Print_Parts'/'01_NFC_base.stl').exists()
+        assert app.grab_current() is None
+        assert app.set_phase('design')
         face_output = target/'SampleFace'
         assert (face_output/'SampleFace_Face.3mf').exists()
         assert (face_output/'SampleFace_Parts.json').exists()
@@ -287,12 +306,21 @@ def run():
         assert app.project.product.kind=='lightbox'
         app.show_object_preview()
         deadline=time.monotonic()+30
-        while app.busy and time.monotonic()<deadline:
+        while (app.busy or getattr(getattr(app,'object_renderer',None),'busy',False)) and time.monotonic()<deadline:
             app.update();time.sleep(.01)
         app.update()
         assert not app.busy and app.object_preview_var.get()
         assert len(app.design_canvas.find_all())==2
+        assert not app.object_renderer.last_error
+        assert app.object_renderer.canvas.image_ref is not None
         app.show_object_preview();assert not app.object_preview_var.get()
+        # Unchanged geometry is reused on reopening the 3D view.
+        with patch('cardforge.product_ui.build_product',side_effect=AssertionError('Preview geometry should be cached')):
+            app.show_object_preview()
+            deadline=time.monotonic()+30
+            while app.object_renderer.busy and time.monotonic()<deadline:app.update();time.sleep(.01)
+            assert app.object_preview_var.get() and not app.object_renderer.last_error
+        app.show_object_preview()
         with patch('cardforge.gui.messagebox.showinfo',side_effect=lambda *a, **kw: notices.append(a)), \
              patch('cardforge.gui.messagebox.showerror',side_effect=lambda *a, **kw: errors.append(a)):
             app._export_direct(True)
@@ -301,6 +329,12 @@ def run():
             while app.busy and time.monotonic()<deadline:
                 app.update();time.sleep(.01)
             assert not app.busy and (target/'Lightbox'/'Lightbox_Assembly.3mf').exists()
+            assert (target/'Lightbox'/'ASSEMBLY_GUIDE.html').exists()
+            app.export_mode.set('Body / base parts only');choose_output('LightboxBody')
+            deadline=time.monotonic()+30
+            while app.busy and time.monotonic()<deadline:app.update();time.sleep(.01)
+            assert not app.busy and (target/'LightboxBody'/'Print_Parts'/'01_Lightbox_shell.stl').exists()
+            assert not list((target/'LightboxBody'/'Print_Parts').glob('*Artwork*'))
         app.start_template('Wall art')
         assert (export_product(app.project,td,'Plaque')/'Print_Parts'/'Plaque_Artwork.3mf').exists()
         mesh=trimesh.creation.box(extents=(70,50,15))
@@ -326,4 +360,4 @@ def run():
         app.recovery_enabled=False
         app.destroy()
         assert not errors, errors
-        return {'passed': True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'inline_named_export': True, 'dark_studio_phases': True, 'inline_painting': True, 'contextual_text_editor': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}
+        return {'passed': True, 'repeated_export_without_restart':True, 'export_failure_recovery':True, 'body_only_export':True, 'illustrated_assembly_guides':True, 'cached_async_3d_preview':True, 'lightbox_gui_and_export':True, 'wall_art_export':True, 'flat_stl_placement':True, 'object_settings':True, 'actual_mesh_preview':True, 'license_support_panel':True, 'commercial_export_gate':True, 'packaged_signed_license_verification':True, 'idle_project_recovery':True, 'small_screen_palette':True, 'paint_apply_cancel_undo': True, 'reversible_grayscale': True, 'independent_background': True, 'single_workspace': True, 'resize_handles': True, 'image_transforms': True, 'layer_ordering': True, 'multiple_png_controls': True, 'inline_named_export': True, 'dark_studio_phases': True, 'inline_painting': True, 'contextual_text_editor': True, 'grayscale_undo': True, 'portable_image_layers': True, 'scratch_templates': True, 'scratch_save_open_export': True, 'text_dialog': True, 'offline_ocr': recognized, 'geometry': 'watertight, oriented', 'project_roundtrip': True, 'gui_startup': True, 'direct_face_export': True, 'logo_stl_export': True, 'undo_redo': True, 'logo_controls': True, 'responsive_face_export': True}

@@ -85,12 +85,12 @@ def _difference(mesh, cutters):
 def _part(name,color,mesh): return {'name':name,'color':color,'mesh':_solid(mesh)}
 
 
-def build_product(project):
+def build_product(project, include_artwork=True):
     """Return face-down aligned construction parts and separately printable accessories."""
     from .face import build_face, prism
     validate_product(project)
     p,g,f = project.product,project.geometry,project.face
-    parts = build_face(project)
+    parts = build_face(project) if include_artwork else []
     if p.kind == 'nfc_card':
         from .geometry import build_nfc_base
         return parts, [_part('NFC base',p.body_color,build_nfc_base(g,project.nfc))]
@@ -152,10 +152,11 @@ def build_product(project):
         # Flip the face-down panel so its backing begins at the attachment gap.
         flip=np.eye(4);flip[0,0]=-1;flip[2,2]=-1;flip[0,3]=fw;flip[2,3]=f.thickness_mm+p.surface_gap_mm
         for part in parts: part['mesh'].apply_transform(transform@flip)
-        panel=trimesh.util.concatenate([part['mesh'] for part in parts])
-        overlap=trimesh.boolean.intersection([mesh,panel],engine='manifold')
-        if overlap is not None and len(overlap.faces) and overlap.volume>max(1e-5,panel.volume*1e-6):
-            raise ValueError('The attached panel intersects another part of this STL. Choose an unobstructed flat surface.')
+        if parts:
+            panel=trimesh.util.concatenate([part['mesh'] for part in parts])
+            overlap=trimesh.boolean.intersection([mesh,panel],engine='manifold')
+            if overlap is not None and len(overlap.faces) and overlap.volume>max(1e-5,panel.volume*1e-6):
+                raise ValueError('The attached panel intersects another part of this STL. Choose an unobstructed flat surface.')
         parts.insert(0,_part('Imported model',p.body_color,mesh))
     if p.mounting == 'desktop' and p.kind in ('wall_art','lightbox'):
         depth=p.depth_mm+f.thickness_mm if p.kind=='lightbox' else f.thickness_mm+p.backing_mm
@@ -223,11 +224,17 @@ def choose_surface(project,path,units,index):
     return s
 
 
-def export_product(project,output,output_name=None):
+def export_product(project,output,output_name=None,scope='complete'):
     from .face import export_face,export_3mf,_export_folder,_safe_stem
     from .colors import export_palette
-    if project.product.kind=='nfc_card': return export_face(project,output,True,output_name)
-    parts,accessories=build_product(project)
+    from .guides import write_assembly_guide
+    if scope not in ('complete','artwork','structure'): raise ValueError('Choose complete object, artwork or body parts.')
+    if scope=='artwork' or (project.product.kind=='nfc_card' and scope=='complete'):
+        out=export_face(project,output,scope=='complete',output_name)
+        write_assembly_guide(project,out,scope)
+        return out
+    parts,accessories=build_product(project,include_artwork=scope!='structure')
+    if project.product.kind=='nfc_card': parts,accessories=accessories,[]
     out=_export_folder(output,'CardForge_Object',output_name);stem=_safe_stem(output_name,'CardForge')
     palette=export_palette(project)
     for color in (project.product.body_color,project.product.diffuser_color):
@@ -240,33 +247,21 @@ def export_product(project,output,output_name=None):
         file=f'{i:02d}_'+_safe_stem(part['name'])+'.stl'
         part['mesh'].export(aligned/file)
         # Preserve alignment in Assembly_STLs; each independent print file sits at Z=0.
-        if part['name'] in ('Lightbox shell','Removable back','Plaque backing','Imported model'):
+        if part['name'] in ('Lightbox shell','Removable back','Plaque backing','Imported model','NFC base'):
             m=part['mesh'].copy()
             if part['name']=='Removable back': m.apply_transform(trimesh.transformations.rotation_matrix(math.pi,[1,0,0]))
             m.apply_translation(-m.bounds[0]);m.export(printable/file)
         info.append({'name':part['name'],'color':part['color'],'assembly_stl':file,'volume_mm3':float(part['mesh'].volume)})
     # A standalone panel remains face-down even when the assembled STL target is tilted.
-    from .face import build_face
-    panel_project=copy.deepcopy(project)
-    export_3mf(build_face(panel_project),printable/(stem+'_Artwork.3mf'),palette,'Artwork — print face-down')
+    if scope!='structure':
+        from .face import build_face
+        panel_project=copy.deepcopy(project)
+        export_3mf(build_face(panel_project),printable/(stem+'_Artwork.3mf'),palette,'Artwork — print face-down')
     for part in accessories:
-        m=part['mesh'].copy();m.apply_translation(-m.bounds[0]);m.export(printable/(_safe_stem(part['name'])+'.stl'))
+        m=part['mesh'].copy();m.apply_translation(-m.bounds[0]);file=_safe_stem(part['name'])+'.stl';m.export(printable/file)
+        info.append({'name':part['name'],'color':part['color'],'print_stl':file,'volume_mm3':float(m.volume)})
     project.save_bundle(out/(stem+'.cardforge'))
     (out/'Parts.json').write_text(json.dumps(info,indent=2),encoding='utf-8')
-    p=project.product
-    notes=f'''CARDFORGE STUDIO — {KINDS[p.kind]}
-
-Assembly.3mf is an assembled model for inspection. Do not slice the whole lightbox as one solid object. Print_Parts contains the independent body/back/accessories and a face-down multipart Artwork.3mf. Assign the named artwork parts to your actual filaments. Assembly_STLs preserve their shared origin.
-
-Artwork is already mirrored for face-down printing. Use translucent filament for the lightbox artwork and diffuser, opaque filament for shell/back. Screen colors do not predict light transmission. Front color depth: {project.face.front_depth_mm:g} mm. Backing/diffuser depth: {project.face.thickness_mm-project.face.front_depth_mm:g} mm.
-
-Lighting profile: {p.lighting_name}. Strip: {p.led_width_mm:g} mm wide, {p.led_thickness_mm:g} mm thick. Strip front edge sits {p.led_setback_mm:g} mm behind the artwork face. Cut interval: {p.led_cut_mm:g} mm. These are user-entered dimensions, not verified electrical compatibility. Route adhesive-backed strip along the inside walls; use its specified bend limits and only marked cut points. No LED strip is included in the model. Measure your connector/controller space before printing.
-
-Lightbox: the separate artwork mounts in front of the body against its support lip; secure it as appropriate after checking light leaks. It sits one panel thickness forward of the shell. The shell prints with its support lip on the bed. The removable back uses a clearance-fit tongue and may need tape/fasteners after a test fit. Print the fit coupon first. Cable notch: {p.cable_side}, {p.cable_diameter_mm:g} mm cable. Do not strain wires against a printed edge. Use an appropriate external low-voltage lighting kit; validate material, temperature and light distribution with that kit. Keep lighting serviceable.
-
-Wall art backing is a separate part to bond to the panel. Imported-STL artwork is a separate attached panel, not a carved inlay; the supplied assembly preserves its placement with a {p.surface_gap_mm:g} mm attachment gap. Inspect the selected surface and fit before bonding.
-
-Check layer heights, every printable part and mounting/stand stability in your slicer and with a test print. This is a release candidate: electrical, thermal and physical fit have not been certified.
-'''
-    (out/'ASSEMBLY_GUIDE.txt').write_text(notes,encoding='utf-8')
+    (out/'Export_scope.txt').write_text(scope+'\n',encoding='utf-8')
+    write_assembly_guide(project,out,scope,info)
     return out

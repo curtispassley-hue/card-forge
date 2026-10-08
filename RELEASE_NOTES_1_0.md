@@ -1,5 +1,13 @@
 # CardForge Studio 1.0 Release Candidate
 
+This revision fixes image painting and repeat exports, makes the 3D preview responsive, and adds body-only exports, illustrated assembly guides, and upgrade/uninstall support.
+
+- Wand clicks replace the selection without a separate Clear action; Shift adds and Alt subtracts. A black/white boundary replaces the blue tint. Original image regions stay independently selectable after painting them the same filament.
+- 3D rendering runs in a background worker, uses a lighter render while rotating, and reuses unchanged geometry. Export mesh detail is unchanged.
+- Export **Complete object**, **Artwork panel only**, **Body / base parts only**, or images. Finish status stays inline with buttons to open the package and offline illustrated guide; continue editing and exporting in the same session.
+- The installer updates the previous installed version and provides a Start Menu uninstall shortcut. **Menu → Updates / uninstall** explains installed and portable copies. Automated upgrade/removal tests preserve a user project.
+- Template-specific text and illustrated HTML guides show NFC, wall art, lightbox, and flat-STL assembly, current project dimensions and lighting settings, included files and Bambu Studio print handling. Partial exports clearly identify omitted artwork/body parts.
+
 NFC cards, wall art, editable desktop/wall lightboxes, and image panels on flat STL surfaces now share the same image/text workspace. Preserve your existing project files and test copies in this release.
 
 New interface: a custom charcoal studio with warm amber accents, original object illustrations, subtle contour graphics, and a faint brand mark behind the preview. One canvas stays with you through **Set up object → Design → Export**. Text edits and image painting now stay in the main workspace, advanced fit/NFC/lighting settings collapse, and exports have persistent name/destination/package controls. Background graphics never enter artwork or print files.

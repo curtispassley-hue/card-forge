@@ -7,11 +7,11 @@ import numpy as np
 from .core.products import KINDS, validate_product, build_product, load_model, model_surfaces, choose_surface
 
 
-def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_down=False, background=None):
+def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_down=False, background=None, max_size=(800,600), cancelled=None):
     """Software depth buffer: rear triangles never paint over nearer artwork."""
     from PIL import Image, ImageColor
     if not parts: return background.copy() if background is not None else Image.new('RGB',(width,height),'#dce4ed')
-    ratio=min(1,800/width,600/height)
+    ratio=min(1,max_size[0]/width,max_size[1]/height)
     rw,rh=max(100,round(width*ratio)),max(100,round(height*ratio))
     yaw,pitch=map(math.radians,(yaw,pitch))
     rz=np.array([[math.cos(yaw),-math.sin(yaw),0],[math.sin(yaw),math.cos(yaw),0],[0,0,1]])
@@ -26,12 +26,14 @@ def mesh_preview(parts, width, height, yaw=30, pitch=55, highlighted=None, face_
     else: pixels=np.asarray(background.resize((rw,rh),Image.Resampling.LANCZOS)).copy()
     depth=np.full((rh,rw),-np.inf)
     for part in parts:
+        if cancelled and cancelled(): return None
         mesh=part['mesh'];xyz=(mesh.vertices-center)@rotation.T
         normals=mesh.face_normals@rotation.T
         rgb=np.array(ImageColor.getrgb(part['color'])[:3])
         # Viewer looks along -Z; a proper 180-degree rotation makes the
         # face-down manufacturing assembly readable from its artwork side.
-        for index in np.flatnonzero(normals[:,2]>1e-9):
+        for number,index in enumerate(np.flatnonzero(normals[:,2]>1e-9)):
+            if number%64==0 and cancelled and cancelled(): return None
             tri=xyz[mesh.faces[index]].copy()
             tri[:,0]=rw/2+tri[:,0]*scale;tri[:,1]=rh/2-tri[:,1]*scale
             x0,y0=np.maximum(0,np.floor(tri[:,:2].min(0)).astype(int))
@@ -182,21 +184,33 @@ class ProductControls:
 
     def show_object_preview(self):
         if not self.editing_ready() or not self.commit_selected() or not self.commit_setup(): return
-        if self.busy: return
         if self.object_preview_var.get():
             self.object_preview_var.set(False);self.refresh_design_preview();return
+        import json
+        from dataclasses import asdict
         self._sync_edits();snapshot=copy.deepcopy(self.project)
+        cache_key=json.dumps(asdict(snapshot),sort_keys=True)
+        cached=getattr(self,'_geometry_preview_cache',None)
+        if cached and cached[0]==cache_key:
+            self.object_preview_parts=cached[1];self.object_preview_var.set(True);self.draw_object_preview();return
         def ready(result):
-            self.object_preview_parts=result[0]
-            if self.project.product.kind=='nfc_card':
+            parts=list(result[0])
+            if snapshot.product.kind=='nfc_card':
                 base=copy.deepcopy(result[1][0])
                 base['mesh'].apply_transform(np.diag([-1.,1.,-1.,1.]))
-                base['mesh'].apply_translation([2*self.project.geometry.card_width_mm+12,0,0]);self.object_preview_parts.append(base)
+                base['mesh'].apply_translation([2*snapshot.geometry.card_width_mm+12,0,0]);parts.append(base)
+            self._geometry_preview_cache=(cache_key,parts)
+            self.object_preview_parts=parts
             self.object_preview_var.set(True);self.draw_object_preview()
         self._background('Building assembly preview…',lambda: build_product(snapshot),ready)
 
-    def draw_object_preview(self):
-        draw_meshes(self.design_canvas,self.object_preview_parts,self.object_yaw,self.object_pitch,face_down=self.project.product.kind!='stl_panel')
+    def draw_object_preview(self, interactive=False):
+        from .preview import PreviewRenderer
+        if not hasattr(self,'object_renderer'):self.object_renderer=PreviewRenderer(self.design_canvas)
+        self.design_canvas.configure(scrollregion=(0,0,0,0))
+        self.design_canvas.xview_moveto(0);self.design_canvas.yview_moveto(0)
+        self.object_renderer.request(self.object_preview_parts,self.object_yaw,self.object_pitch,
+                                     face_down=self.project.product.kind!='stl_panel',interactive=interactive)
 
     def product_report(self):
         p=self.project.product;errors=[]

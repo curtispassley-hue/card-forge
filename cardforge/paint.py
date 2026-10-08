@@ -30,6 +30,7 @@ class ImageWorkshop(ttk.Frame):
         self.tool = tk.StringVar(value='wand'); self.slot = tk.IntVar(value=1)
         self.tolerance = tk.IntVar(value=30); self.brush = tk.IntVar(value=8)
         self.contiguous = tk.BooleanVar(value=True)
+        self.region_source = tk.StringVar(value='Original image regions')
         self.cutoff = tk.IntVar(value=layer.alpha_cutoff)
         self.edge_preview = tk.BooleanVar(value=False)
         self._fit_ready = False
@@ -68,6 +69,10 @@ class ImageWorkshop(ttk.Frame):
         ttk.Label(controls, text='Wand tolerance · 0–255').pack(anchor='w', pady=(10, 0))
         ttk.Spinbox(controls, from_=0, to=255, textvariable=self.tolerance, width=8).pack(anchor='w')
         ttk.Checkbutton(controls, text='Connected region only', variable=self.contiguous).pack(anchor='w', pady=6)
+        ttk.Combobox(controls, textvariable=self.region_source, state='readonly',
+                    values=['Original image regions', 'Displayed colors']).pack(fill='x', pady=4)
+        ttk.Label(controls, text='Click a new part to replace selection.\nShift-click adds; Alt-click subtracts.',
+                  style='Muted.TLabel', wraplength=220).pack(anchor='w', pady=(4, 8))
         ttk.Label(controls, text='Brush diameter · image pixels').pack(anchor='w')
         ttk.Spinbox(controls, from_=1, to=200, textvariable=self.brush, width=8).pack(anchor='w', pady=(0, 12))
         ttk.Label(controls, text='PAINT FILAMENT', style='Step.TLabel').pack(anchor='w')
@@ -110,7 +115,7 @@ class ImageWorkshop(ttk.Frame):
         self.canvas.bind('<MouseWheel>', lambda e: self.change_zoom(1.25 if e.delta > 0 else .8))
         self.canvas.bind('<ButtonPress-2>', self.pan_start)
         self.canvas.bind('<B2-Motion>', self.pan)
-        ttk.Label(right, text='Wheel: zoom • Middle-drag: pan • Blue overlay: selected pixels', style='Muted.TLabel').pack(anchor='w', pady=6)
+        ttk.Label(right, text='Wheel: zoom • Middle-drag: pan • Dotted outline: selection • Escape: clear', style='Muted.TLabel').pack(anchor='w', pady=6)
         self.bind('<Control-z>', lambda e: self.action(self.editor.undo))
         self.bind('<Control-y>', lambda e: self.action(self.editor.redo))
         self.bind('<Escape>', lambda e: self.clear_selection())
@@ -126,7 +131,7 @@ class ImageWorkshop(ttk.Frame):
         try:
             callback(); self.render()
             count = int(self.editor.selection.sum()) if self.editor.selection is not None else 0
-            self.status.set(f'{count:,} selected pixels. Done painting keeps these edits; Cancel painting discards them.')
+            self.status.set(f'{count:,} selected pixels. Click a new part to replace selection; Done painting keeps your edits.')
         except (ValueError, tk.TclError) as exc: self.status.set(str(exc))
 
     def clear_selection(self):
@@ -175,7 +180,9 @@ class ImageWorkshop(ttk.Frame):
             if not (0 <= point[0] < self.editor.image.width and 0 <= point[1] < self.editor.image.height): return
             if self.tool.get() == 'wand':
                 tolerance = self.valid_int(self.tolerance,0,255,'Tolerance')
-                self.action(lambda: self.editor.select_region(point,tolerance,self.contiguous.get(),self.palette))
+                operation = 'subtract' if getattr(event, 'state', 0) & 8 else 'add' if getattr(event, 'state', 0) & 1 else 'replace'
+                source = 'original' if self.region_source.get() == 'Original image regions' else 'display'
+                self.action(lambda: self.editor.select_region(point,tolerance,self.contiguous.get(),self.palette,source,operation))
             else:
                 self.valid_int(self.brush,1,200,'Brush diameter')
                 self.editor.remember(); self.last_point = point
@@ -203,16 +210,18 @@ class ImageWorkshop(ttk.Frame):
             try: cutoff = self.valid_int(self.cutoff,1,255,'Edge threshold')
             except ValueError: return
             image.putalpha(image.getchannel('A').point(lambda a: 255 if a*self.layer.opacity/255 >= cutoff else 0))
-        if self.editor.selection is not None:
-            overlay = Image.new('RGBA',image.size,'#00B8D9')
-            overlay.putalpha(Image.fromarray(self.editor.selection.astype('uint8')*85))
-            image = Image.alpha_composite(image,overlay)
         tile = image.transform((w,h),Image.Transform.AFFINE,(1/self.zoom,0,-self.ox/self.zoom,0,1/self.zoom,-self.oy/self.zoom),resample=Image.Resampling.NEAREST)
         check = Image.new('RGBA',(w,h),'#252931'); draw=ImageDraw.Draw(check)
         for y in range(0,h,16):
             for x in range(0,w,16):
                 if (x//16+y//16)%2: draw.rectangle((x,y,x+15,y+15),fill='#343a44')
         check.alpha_composite(tile)
+        if self.editor.selection is not None:
+            from .core.painting import selection_outline
+            mask = Image.fromarray(self.editor.selection.astype('uint8')*255).transform(
+                (w,h), Image.Transform.AFFINE, (1/self.zoom,0,-self.ox/self.zoom,0,1/self.zoom,-self.oy/self.zoom),
+                resample=Image.Resampling.NEAREST)
+            check = selection_outline(check, np.asarray(mask)>0)
         self.photo = ImageTk.PhotoImage(check); c.delete('all'); c.create_image(0,0,anchor='nw',image=self.photo)
 
     def cancel(self):

@@ -72,16 +72,31 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" installer/CardForgeStudio.iss
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DReleaseNumber=${{ github.run_number }}" installer/CardForgeStudio.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
 
       - name: Test installation and removal
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $target = Join-Path $env:RUNNER_TEMP 'CardForge-installed-test'
+          $previous = Join-Path $env:RUNNER_TEMP 'CardForge-previous-installer'
+          gh release download v1.0.0-rc.19 --repo curtispassley-hue/card-forge --pattern CardForgeStudio-Setup.exe --dir $previous
+          if ($LASTEXITCODE -ne 0) { throw 'Previous installer download failed' }
+          $previousSetup = Join-Path $previous 'CardForgeStudio-Setup.exe'
+          if ((Get-FileHash -Algorithm SHA256 $previousSetup).Hash.ToLower() -ne '23785a13e8381da3c9e226aa086a0626876851ee43271e393c7c8c697d97801f') { throw 'Previous installer checksum mismatch' }
+          $old = Start-Process $previousSetup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target" -PassThru -WindowStyle Hidden
+          if (-not $old.WaitForExit(180000) -or $old.ExitCode -ne 0) { throw 'Previous version installation failed' }
+          $userProject = Join-Path $target 'Keep_My_Project.cardforge.json'
+          '{"format_version":"0.6.0","name":"Keep my design"}' | Set-Content -Encoding utf8 $userProject
+          $userHash = (Get-FileHash -Algorithm SHA256 $userProject).Hash
           $setup = Start-Process dist/CardForgeStudio-Setup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target" -PassThru -WindowStyle Hidden
           if (-not $setup.WaitForExit(180000)) { $setup.Kill(); throw 'Installation timed out' }
           if ($setup.ExitCode -ne 0) { throw 'Installation failed' }
+          if ((Get-FileHash -Algorithm SHA256 $userProject).Hash -ne $userHash) { throw 'Upgrade modified a user project' }
+          $uninstallShortcut = Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs/CardForge Studio/Uninstall CardForge Studio.lnk'
+          if (-not (Test-Path $uninstallShortcut)) { throw 'Uninstall shortcut is missing' }
           $report = Join-Path $PWD 'installer-test.json'
           $app = Start-Process "$target/CardForge4D.exe" -ArgumentList '--self-test', $report -PassThru -WindowStyle Hidden
           if (-not $app.WaitForExit(180000)) { $app.Kill(); throw 'Installed app timed out' }
@@ -92,6 +107,8 @@ jobs:
           $uninstaller = Start-Process "$target/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -PassThru -WindowStyle Hidden
           if (-not $uninstaller.WaitForExit(120000)) { $uninstaller.Kill(); throw 'Uninstall timed out' }
           if ($uninstaller.ExitCode -ne 0 -or (Test-Path "$target/CardForge4D.exe")) { throw 'Uninstall failed' }
+          if ((Get-FileHash -Algorithm SHA256 $userProject).Hash -ne $userHash) { throw 'Uninstall removed a user project' }
+          @{passed=$true; upgraded_from='v1.0.0-rc.19'; user_project_preserved=$true; uninstall_shortcut=$true} | ConvertTo-Json | Set-Content upgrade-test.json
 
       - name: Create distributable ZIP
         shell: pwsh
@@ -101,6 +118,7 @@ jobs:
           Copy-Item README.md release\README.md
           Copy-Item LICENSE.txt release\LICENSE.txt
           Copy-Item COMMERCIAL_SETUP.md release\COMMERCIAL_SETUP.md
+          Copy-Item UPDATE_GUIDE.md release\UPDATE_GUIDE.md
           Compress-Archive -Path release\* -DestinationPath CardForge4D-Windows.zip -Force
           git archive --format=zip --output=CardForge4D-Source.zip HEAD
           $files = @('CardForge4D-Windows.zip', 'CardForge4D-Source.zip', 'dist/CardForgeStudio-Setup.exe')
@@ -117,7 +135,7 @@ jobs:
             gh release create $tag --target '${{ github.sha }}' --prerelease --title 'CardForge Studio 1.0 Release Candidate' --notes-file RELEASE_NOTES_1_0.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
-          gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip dist/CardForgeStudio-Setup.exe exe-test.json installer-test.json defender-scan.json SHA256SUMS.txt --clobber
+          gh release upload $tag CardForge4D-Windows.zip CardForge4D-Source.zip dist/CardForgeStudio-Setup.exe exe-test.json installer-test.json upgrade-test.json defender-scan.json SHA256SUMS.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
 
       - name: Upload EXE artifact
@@ -131,6 +149,7 @@ jobs:
             exe-test.json
             source-test.json
             installer-test.json
+            upgrade-test.json
             dist/CardForgeStudio-Setup.exe
             SHA256SUMS.txt
 

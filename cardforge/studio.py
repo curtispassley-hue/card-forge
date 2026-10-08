@@ -526,6 +526,7 @@ class StudioWorkspace(StudioShell):
     def refresh_design_preview(self):
         if not hasattr(self, 'design_canvas'): return
         if self.object_preview_var.get(): self.draw_object_preview();return
+        if hasattr(self,'object_renderer'): self.object_renderer.cancel()
         if self._canvas_job is not None:
             self.after_cancel(self._canvas_job); self._canvas_job = None
         im = face_preview(self.project) if self.print_view_var.get() else self.composite_image()
@@ -659,7 +660,7 @@ class StudioWorkspace(StudioShell):
         if self.object_preview_var.get():
             x,y,yaw,pitch=self._object_drag
             self.object_yaw=yaw+(event.x-x)*.5;self.object_pitch=pitch+(event.y-y)*.5
-            self.draw_object_preview();return
+            self.draw_object_preview(interactive=True);return
         if self.phase != 'design': return
         p = self._event_mm(event)
         if p is None or self.busy: return
@@ -689,7 +690,7 @@ class StudioWorkspace(StudioShell):
         self.sync_inspector(); self.refresh_design_preview()
 
     def design_release(self, event):
-        if self.object_preview_var.get(): return
+        if self.object_preview_var.get(): self.draw_object_preview();return
         if self.logo_select_mode and self.logo_select_start:
             p = self._event_mm(event)
             start = self.logo_select_start

@@ -287,13 +287,18 @@ class StudioShell:
         ttk.Entry(panel,textvariable=self.output_dir_var).pack(fill='x')
         self._button(panel,'Choose folder',self.browse_output_folder,'folder').pack(fill='x',pady=5)
         ttk.Label(panel,text='Package',style='Muted.TLabel').pack(anchor='w',pady=(8,3))
-        ttk.Combobox(panel,textvariable=self.export_mode,values=['Complete object','Artwork panel only','Images only'],state='readonly').pack(fill='x')
+        ttk.Combobox(panel,textvariable=self.export_mode,values=['Complete object','Artwork panel only','Body / base parts only','Images only'],state='readonly').pack(fill='x')
         self.export_mode.trace_add('write',lambda *_:self.refresh_export_report())
         self.export_summary=tk.StringVar();ttk.Label(panel,textvariable=self.export_summary,wraplength=264,style='Muted.TLabel').pack(anchor='w',pady=12)
         self.export_checks=tk.StringVar();ttk.Label(panel,textvariable=self.export_checks,wraplength=264).pack(anchor='w',pady=8)
         self._button(panel,'Review checks',lambda:self.show_tool('checks'),'check').pack(fill='x',pady=4)
         ttk.Label(panel,textvariable=self.export_error,foreground='#ffb4b4',wraplength=264).pack(anchor='w',pady=8)
         self.export_button=self._button(panel,'Export files',self.begin_export,'download','Accent.TButton');self.export_button.pack(fill='x',pady=4)
+        self.export_completion=tk.StringVar()
+        ttk.Label(panel,textvariable=self.export_completion,wraplength=264,style='Muted.TLabel').pack(anchor='w',pady=6)
+        self.export_result_actions=ttk.Frame(panel)
+        self._button(self.export_result_actions,'Open output folder',lambda:self.open_export_file(False),'folder').pack(fill='x',pady=3)
+        self._button(self.export_result_actions,'Open assembly guide',lambda:self.open_export_file(True),'card').pack(fill='x',pady=3)
         ttk.Label(panel,text='A new named folder keeps your files together. Existing packages receive a numbered suffix.',wraplength=264,style='Muted.TLabel').pack(anchor='w',pady=8)
 
     def refresh_export_report(self):
@@ -301,6 +306,7 @@ class StudioShell:
         mode=self.export_mode.get()
         self.export_summary.set({'Complete object':'Includes the assembled 3MF, printable parts, aligned artwork STLs and print / assembly guide.',
             'Artwork panel only':'Includes a multipart artwork 3MF, aligned color STLs, part names and print guide.',
+            'Body / base parts only':'Includes the base or shell, back and accessories. No artwork geometry is generated. Print files and the illustrated assembly guide are included.',
             'Images only':'Includes separate image geometry in a multipart 3MF and aligned STL parts.'}[mode])
         colors=set(c.upper() for c in effective_palette(self.project));colors.add(self.project.face.background_color.upper())
         checks=''
@@ -329,12 +335,24 @@ class StudioShell:
         out=str(Path(folder).expanduser());self.output_dir_var.set(out);self.export_error.set('')
         def job():
             if mode=='Images only':return export_logo(snapshot,out,output_name=name)
-            if mode=='Artwork panel only':return export_face(snapshot,out,False,output_name=name)
-            return export_product(snapshot,out,output_name=name)
+            scope={'Complete object':'complete','Artwork panel only':'artwork','Body / base parts only':'structure'}[mode]
+            return export_product(snapshot,out,output_name=name,scope=scope)
         def ready(result):
             self.status.set(f'Print files saved in {result}')
-            messagebox.showinfo('CardForge',f'Files ready in:\n{result}\n\nOpen the 3MF as a model in Bambu Studio and assign colors to the named parts. Read the included print guide.',parent=self)
-        self._background('Building your print package…',job,ready)
+            self.last_export=Path(result)
+            self.export_completion.set(f'Files ready: {result}\nYou can edit or export another package now.')
+            self.export_result_actions.pack(fill='x',pady=8)
+        self.export_completion.set('');self.export_result_actions.pack_forget()
+        self._background('Building your print package…',job,ready,failed=lambda message:self.export_error.set(message))
+
+    def open_export_file(self, guide=False):
+        import os
+        folder=getattr(self,'last_export',None)
+        if folder is None:return
+        file=folder/'ASSEMBLY_GUIDE.html' if guide else folder
+        if guide and not file.exists():file=next(iter(folder.glob('*README.txt')),folder)
+        try:os.startfile(str(file))
+        except OSError as exc:self.export_error.set(str(exc))
 
     def add_inline_text(self):
         if not self.set_phase('design'):return

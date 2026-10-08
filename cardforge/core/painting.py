@@ -4,6 +4,18 @@ from PIL import Image, ImageDraw
 from scipy import ndimage
 
 
+def selection_outline(image, mask):
+    """One viewport-pixel black/white border; selected interior colors stay exact."""
+    mask = np.asarray(mask, dtype=bool)
+    border = mask & ~ndimage.binary_erosion(mask)
+    out = np.array(image.convert('RGBA'))
+    yy, xx = np.indices(mask.shape)
+    white = ((xx+yy)//5)%2 == 0
+    out[border & white] = (255,255,255,255)
+    out[border & ~white] = (0,0,0,255)
+    return Image.fromarray(out)
+
+
 class PixelEditor:
     def __init__(self, image, slots=None, original=None):
         self.image = image.convert('RGBA')
@@ -35,19 +47,33 @@ class PixelEditor:
         for i, color in enumerate(palette, 1): out[slots == i, :3] = ImageColor.getrgb(color)[:3]
         return Image.fromarray(out)
 
-    def select_region(self, point, tolerance=30, contiguous=True, palette=None):
+    def select_region(self, point, tolerance=30, contiguous=True, palette=None, source='original', operation='replace'):
         x, y = map(int, point)
         if not (0 <= x < self.image.width and 0 <= y < self.image.height): return
         self.remember()
-        arr = np.asarray(self.preview(palette) if palette else self.image).astype(np.int16)
+        # Repainting must not merge adjacent, originally different objects just
+        # because they now use the same spool. Original pixels travel in projects.
+        current = np.asarray(self.image)
+        if source == 'original':
+            arr = np.asarray(self.original).astype(np.int16)
+        elif source == 'display':
+            arr = np.asarray(self.preview(palette) if palette else self.image).astype(np.int16)
+        else: raise ValueError('Choose original regions or displayed colors.')
+        alpha = current[:,:,3]
+        added = np.asarray(self.original)[:,:,3] == 0
+        if source == 'original' and added[y,x] and alpha[y,x]:
+            arr = current.astype(np.int16)
         distance = np.max(np.abs(arr[:,:,:3]-arr[y,x,:3]), axis=2)
-        alpha = arr[:,:,3]
         match = (distance <= tolerance) & (alpha > 0) if alpha[y,x] else alpha == 0
+        if source == 'original' and added[y,x] and alpha[y,x]: match &= added
         if contiguous:
             labels, _ = ndimage.label(match)
             label = labels[y,x]
             match = labels == label if label else np.zeros(match.shape, dtype=bool)
-        self.selection = match
+        if operation == 'replace' or self.selection is None: self.selection = match
+        elif operation == 'add': self.selection |= match
+        elif operation == 'subtract': self.selection &= ~match
+        else: raise ValueError('Choose replace, add or subtract selection.')
 
     def refine(self, action, pixels=1):
         if self.selection is None: return
